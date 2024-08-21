@@ -115,12 +115,12 @@ class BEACON_Client():
         
         Parameters
         ----------
-        message : ??? type
+        message : dict
             Message for the server.
         
         Returns
         -------
-        response : ??? type
+        response : dict
             Response from the server.
         '''
         
@@ -135,7 +135,7 @@ class BEACON_Client():
         Parameters
         ----------
         dwell : float
-            Dwell time in microseconds [CHECK]
+            Dwell time in seconds
         size : int
             Image size in pixels
         return_images : bool
@@ -229,22 +229,21 @@ class BEACON_Client():
             Response = self.get_image(ab_values)
             self.norm_values[i], self.norm_image_dict[i] = Response['reply_data']
 
-    def custom_acq_func(self, x, obj):
+    def custom_ucb_func(self, x, obj):
         '''
         Custom acquisition function.
         
         Parameters
         ----------
-        x : ???
-            ???
-        obj : ???
+        x : array
+            Array of measurement locations
+        obj : gp_optimizer class
             Instance of gpcam.AutonomousExperimenterGP.gp_optimizer
         '''
         
-        #print('using custom')
         mean = obj.posterior_mean(x)["f(x)"]
         cov = obj.posterior_covariance(x)["v(x)"]
-        return mean + self.ucb_A * np.sqrt(cov)
+        return mean + self.ucb_coefficient * np.sqrt(cov)
 
     def custom_noise(self, x, hps, obj):
         '''
@@ -252,11 +251,11 @@ class BEACON_Client():
         
         Parameters
         ----------
-        x : ???
-            ???
-        hps: ???
-            gpcam hyperparamaters
-        obj : ???
+        x : array
+            Array of measurement locations
+        hps: array
+            Numpy array containing gpcam hyperparamaters
+        obj : gp_optimizer class
             Instance of gpcam.AutonomousExperimenterGP.gp_optimizer
         '''
         
@@ -273,14 +272,15 @@ class BEACON_Client():
         
         Parameters
         ----------
-        data : ???
+        data : list
             Data from gpcam
         
         Returns
         -------
-        data : ???
+        data : list
             Updated data from gpcam
         '''
+        
         for entry in data:
             # breakpoint()
             ab_values = {}
@@ -311,7 +311,7 @@ class BEACON_Client():
         
         Parameters
         ----------
-        obj : ???
+        obj : gp_optimizer class
             Instance of gpcam.AutonomousExperimenterGP.gp_optimizer
         '''
         x_data = obj.x_data[-1]
@@ -326,7 +326,7 @@ class BEACON_Client():
 
         # Update GUI status bar
         if self.status_callback is not None:
-            status_reply = pickle.dumps(f'{len(obj.x_data)}, np.array2string(x_data, precision=2, floatmode="fixed"), {"{:.2f}".format(y_data)}')
+            status_reply = pickle.dumps(f'{len(obj.x_data)}, {np.array2string(x_data, precision=2, floatmode="fixed")}, {"{:.2f}".format(y_data)}')
             self.status_callback.emit(status_reply)
         
         # Append this iteration's hyperparameters to the list
@@ -362,7 +362,7 @@ class BEACON_Client():
         
         Parameters
         ----------
-        obj : ???
+        obj : gp_optimizer class
             Instance of gpcam.AutonomousExperimenterGP.gp_optimizer
         points : int
             Resolution with which to sample the surrogate model
@@ -400,8 +400,8 @@ class BEACON_Client():
         self.BEACON_dict = {'x': self.ae.x_data, # NEEDS TO BE RESCALED
                            'y': self.ae.y_data,
                            'range_dict': self.ranges,
-                           'init_size': self.init_size,
-                           'func': self.func,
+                           'init_size': self.init_size_input,
+                           'func': self.acq_func,
                            'dwell': self.dwell,
                            'size': self.size,
                            'metric': self.metric,
@@ -420,15 +420,15 @@ class BEACON_Client():
                            'model_max_list': self.model_max_list,
                            }
         
-        if self.custom_ucb_factor is not None:
-            self.BEACON_dict['func'] = f'ucb-{self.custom_ucb_factor}'
+        if self.ucb_coefficient is not None:
+            self.BEACON_dict['func'] = f'ucb-{self.ucb_coefficient}'
         
         return self.BEACON_dict
 
     def ae_main(self,
                 ranges,
                 init_size,
-                runs,
+                iterations,
                 func,
                 dwell, 
                 size, 
@@ -443,7 +443,7 @@ class BEACON_Client():
                 return_final_f_re=False,
                 return_model_max_list=False,
                 custom_early_stop_flag=False,
-                custom_ucb_factor=2,
+                ucb_coefficient=2,
                 noise_level=0.1,
                 init_hps=None,
                 hp_bounds=None,
@@ -452,24 +452,24 @@ class BEACON_Client():
                 images_callback=None,
                 stopped_callback=None):
         '''
-        Main function for setting up and starting Bayesian optimization run
+        Main function for setting up and starting BEACON run
         
         Parameters
         ----------
         ranges : list
             Search ranges for each of the parameters
         init_size : int
-            Number of initial random searches before Bayesian optimization begins
-        runs : int
+            Number of initial random searches before BEACON begins
+        iterations : int
             Initial number of iterations for a single run [CONFUSING NAMING]
         func : 
             Name of the function to be used [WHAT OPTIONS?]
         dwell : float
-            Dwell time in microseconds [CHECK]
+            Dwell time in seconds
         size : int
             Image size in pixels
         metric : str
-            Name of the metric to be used [WHAT OPTIONS?]
+            Name of the metric to be used (normalized variance, variance, standard deviation)
         return_images : bool
             Flag to return image to the GUI display
         bscomp : bool
@@ -491,8 +491,8 @@ class BEACON_Client():
             Calculate and save the model maximum after every iteration
         custom_early_stop_flag : bool
             Use early stopping criterion (NOT CURRENTLY IMPLEMENTED)
-        custom_ucb_factor : float
-            UCB factor used in the custom_acq_func (increasing favors exploration, decreasing favors exploitation)
+        ucb_coefficient : float
+            UCB factor used in the custom_ucb_func (increasing favors exploration, decreasing favors exploitation)
         noise_level : float
             Noise level for custom_noise function
         init_hps : list
@@ -506,7 +506,7 @@ class BEACON_Client():
         images_callback : pyqt worker signal
             pyqt worker signal for GUI images plotting
         stopped_callback : pyqt worker signal
-            pyqt worker signal for GUI stopping ???
+            pyqt worker signal for stopping BEACON run
         '''
         
         self.status_callback = status_callback
@@ -527,15 +527,13 @@ class BEACON_Client():
 
         self.ranges = ranges
         self.init_size = init_size
-        self.custom_ucb_factor = custom_ucb_factor
+        self.ucb_coefficient = ucb_coefficient
         self.noise_level = noise_level
         
-        if self.custom_ucb_factor is not None:
-            print('should use custom')
-            self.func=self.custom_acq_func
-            self.ucb_A = self.custom_ucb_factor
-        else:
-            self.func = func
+        if self.ucb_coefficient is None:
+            self.ucb_coefficient = 3
+            
+        self.acq_func = self.custom_ucb_func
         
         self.dwell = dwell
         self.size = size
@@ -595,7 +593,7 @@ class BEACON_Client():
                                            self.hp_bounds,
                                            instrument_function=self.instrument,
                                            init_dataset_size=self.init_size,
-                                           acquisition_function=self.func,
+                                           acquisition_function=self.acq_func,
                                            noise_function=self.custom_noise,
                                            run_every_iteration=self.run_in_every_iter,
                                            compute_device='cpu',
@@ -607,25 +605,25 @@ class BEACON_Client():
                 x_data_interp[i] = np.interp(self.ae.x_data[j][i], (-1, 1), (self.range_values[i][0], self.range_values[i][1]))
             print(j+1, np.array2string(x_data_interp, precision=2, floatmode='fixed'), '{:.2f}'.format(self.ae.y_data[j]))
             
-        self.ae_run(runs)
+        self.ae_run(iterations)
         
-    def ae_run(self, runs, retraining_list=None):
+    def ae_run(self, iterations, retraining_list=None):
         '''
-        Run Bayesian optimization for a given number of iterations
+        Run BEACON for a given number of iterations
         
         Parameters
         ----------
-        runs : int
-            Number of Bayesian optimization iterations
+        iterations : int
+            Number of BEACON iterations
         retraining_list : list
             Iterations at which to retrain the hyperparameters
         '''
         if retraining_list == None:
-            retraining_list = list(np.arange(0,runs,10))
+            retraining_list = list(np.arange(0,iterations,10))
         
         N = len(self.ae.x_data)
             
-        for i in range(runs):
+        for i in range(iterations):
             if not self.stop:
                 N+=1
                 self.ae.go(N = N, retrain_globally_at=retraining_list, # retraining list in function declaration
@@ -650,14 +648,21 @@ class BEACON_Client():
         #print(mm_ab_values)
                
         self.ccorr = False
+        '''
         self.size = 1024
         self.dwell = 4e-6
-        
+        '''
         Response = self.get_image({})
         _, self.initial_image = Response['reply_data']
         
         Response = self.get_image(mm_ab_values)
         _, self.final_image = Response['reply_data']
+        
+        if self.return_images and self.images_callback is not None:
+            self.initial_image['panel'] = 0
+            self.images_callback.emit(pickle.dumps(self.initial_image))
+            self.final_image['panel'] = 1
+            self.images_callback.emit(pickle.dumps(self.final_image))
         
         if self.status_callback is not None:
             self.status_callback.emit(pickle.dumps(f'model max = {mmstr}'))
@@ -674,18 +679,18 @@ class BEACON_Client():
         
         print('Done')
     
-    def continue_training(self, continue_runs=5,
+    def continue_training(self, extra_iterations=5,
                           status_callback=None,
                           figure_callback=None,
                           images_callback=None,
                           stopped_callback=None):
         '''
-        Continue Bayesian optimization run for a given number of iterations
+        Continue BEACON run for a given number of iterations
         
         Parameters
         ----------
-        continue_runs : int
-            Number of Bayesian optimization iterations by which to continue the run
+        extra_iterations : int
+            Number of BEACON iterations by which to continue the run
         status_callback : pyqt worker signal
             pyqt worker signal for GUI status bar
         figure_callback : pyqt worker signal
@@ -693,7 +698,7 @@ class BEACON_Client():
         images_callback : pyqt worker signal
             pyqt worker signal for GUI images plotting
         stopped_callback : pyqt worker signal
-            pyqt worker signal for GUI stopping ???
+            pyqt worker signal for stopping BEACON run
         '''
         
         self.stop = False
@@ -706,9 +711,31 @@ class BEACON_Client():
         print('Continue Function Called')
         
         if self.ae is not None:
-            self.ae_run(continue_runs)
+            self.ae_run(extra_iterations)
         else:
             print('self.ae does not exist')
+    
+    def accept_aberrations(self):
+        model_max = self.ae.gp_optimizer.ask(bounds=self.parameters, acquisition_function='maximum')['x'][0]
+        ab_keys = self.ab_keys
+        
+        if len(ab_keys) != len(model_max):
+            raise ValueError('ab_keys and model_max have different lengths')
+        
+        self.last_saved_correction = {}
+        for i in range(len(ab_keys)):
+            self.last_saved_correction[ab_keys[i]] = model_max[i]
+        
+        self.ab_only(self.last_saved_correction, 
+                     C1_defocus_flag=self.C1_defocus_flag,
+                     bscomp=self.bscomp)
+        
+    def undo_last(self):
+        self.ab_only(self.last_saved_correction, 
+                     C1_defocus_flag=self.C1_defocus_flag, 
+                     undo=True, bscomp=self.bscomp)
+        
+        self.last_saved_correction = {}
     
     def rebuild(self, hps=None, x_data=None, y_data=None):
         
@@ -736,7 +763,7 @@ class BEACON_Client():
                                              self.hyperparameter_bounds,
                                              x_data=x_data,
                                              y_data=y_data, 
-                                             acq_func=self.custom_acq_func,
+                                             acq_func=self.custom_ucb_func,
                                              compute_device="cpu")
         
         #self.ae_2.train()
@@ -793,34 +820,38 @@ class Widget(QWidget):
         self.check_boxes[1].setChecked(True)
         self.check_boxes[2].setChecked(True)
         
-        self.dwell = QLineEdit('2')
-        self.size = QLineEdit('512')
-        self.metric = QComboBox()
-        self.metric.addItems(['Normalised Variance', 'Variance', 'Standard Deviation'])
-        self.metric_names = ['normvar', 'var', 'std']
-        self.init_size = QLineEdit('5')
-        self.runs = QLineEdit('40')
-        self.continue_runs = QLineEdit('10')
-        self.func = QComboBox()
-        self.func.addItems(['Upper Confidence Bound'])
-        self.func_names = ['ucb']
-        self.return_images = QCheckBox()
-        self.return_images.setChecked(True)
-        self.ccorr = QCheckBox()
-        self.ccorr.setChecked(True)
-        self.bscomp = QCheckBox()
+        self.dwell_input = QLineEdit('2')
+        self.size_input = QLineEdit('512')
+        self.metric_input = QComboBox()
+        self.metric_input.addItems(['Normalised Variance', 'Variance', 'Standard Deviation'])
+        self.metric_input_names = ['normvar', 'var', 'std']
+        self.init_size_input = QLineEdit('5')
+        self.iterations_input = QLineEdit('10')
+        self.extra_iterations_input = QLineEdit('10')
+        self.acq_func_input = QComboBox()
+        self.acq_func_input.addItems(['Upper Confidence Bound'])
+        self.acq_func_input_names = ['ucb']
+        self.ucb_coefficient_input = QLineEdit('2.0')
+        self.noise_level_input = QLineEdit('0.1')
+        self.return_images_input = QCheckBox()
+        self.return_images_input.setChecked(True)
+        self.ccorr_input = QCheckBox()
+        self.ccorr_input.setChecked(True)
+        self.bscomp_input = QCheckBox()
         
         settingsLayout = QFormLayout()
-        settingsLayout.addRow('Dwell Time (us)', self.dwell)
-        settingsLayout.addRow('Image Size', self.size)
-        settingsLayout.addRow('Metric', self.metric)
-        settingsLayout.addRow('Initial Runs', self.init_size)
-        settingsLayout.addRow('Optimization Runs', self.runs)
-        settingsLayout.addRow('Extra Runs', self.continue_runs)
-        settingsLayout.addRow('Method', self.func)
-        settingsLayout.addRow('Show Images', self.return_images)
-        settingsLayout.addRow('Use Cross Correlation', self.ccorr)
-        settingsLayout.addRow('Compensate with Beam Shift', self.bscomp)
+        settingsLayout.addRow('Dwell Time (us)', self.dwell_input)
+        settingsLayout.addRow('Image Size (min = 128)', self.size_input)
+        settingsLayout.addRow('Metric', self.metric_input)
+        settingsLayout.addRow('Initial Iterations', self.init_size_input)
+        settingsLayout.addRow('Optimization Iterations', self.iterations_input)
+        settingsLayout.addRow('Extra Iterations', self.extra_iterations_input)
+        settingsLayout.addRow('Method', self.acq_func_input)
+        settingsLayout.addRow('UCB Coefficient', self.ucb_coefficient_input)
+        settingsLayout.addRow('Noise Level', self.noise_level_input)
+        settingsLayout.addRow('Show Images', self.return_images_input)
+        settingsLayout.addRow('Use Cross Correlation', self.ccorr_input)
+        settingsLayout.addRow('Compensate with Beam Shift', self.bscomp_input)
         
         buttonsLayout = QGridLayout()
         
@@ -851,7 +882,8 @@ class Widget(QWidget):
         self.fig_surrogate, self.ax_surrogate = plt.subplots(1,1)
         self.ax_surrogate.set_axis_off()
         self.ax_surrogate.axis('equal')
-        self.ax_surrogate.matshow(self.blank_surrogate)
+        self.imax_surrogate = self.ax_surrogate.matshow(self.blank_surrogate)
+        
         self.fig_surrogate.set_tight_layout(True)
         self.canvas_surrogate = FigureCanvas(self.fig_surrogate)
         statusPanelLayout.addWidget(self.canvas_surrogate)
@@ -872,20 +904,22 @@ class Widget(QWidget):
         
         imagePanelLayout = QVBoxLayout()
         
-        im_size = 512
+        im_size = int(self.size_input.text())
         self.blank_image = np.zeros((im_size,im_size))
         
         self.fig_before, self.ax_before = plt.subplots(1,1)
         self.ax_before.set_axis_off()
-        self.ax_before.axis('equal')
-        self.ax_before.matshow(self.blank_image)
+        self.ax_before.axis('equal') 
+        self.imax_before = self.ax_before.matshow(self.blank_image)
+        
         self.fig_before.set_tight_layout(True)
         self.canvas_before = FigureCanvas(self.fig_before)
         
         self.fig_after, self.ax_after = plt.subplots(1,1)
         self.ax_after.set_axis_off()
         self.ax_after.axis('equal')
-        self.ax_after.matshow(self.blank_image)
+        self.imax_after = self.ax_after.matshow(self.blank_image)
+        
         self.fig_after.set_tight_layout(True)
         self.canvas_after = FigureCanvas(self.fig_after)
         
@@ -924,7 +958,7 @@ class Widget(QWidget):
         
     def start_func(self):
         '''
-        Function triggered by "start" button. Begins Bayesian optimization run with parameters in the GUI
+        Function triggered by "start" button. Begins BEACON run with parameters in the GUI
         '''
         
         self.ac_ae.stop = False
@@ -947,24 +981,31 @@ class Widget(QWidget):
             self.msgPanel.append('Select at least one aberration')
             self.start_button.setEnabled(True)
         else:
-            dwell_value = float(self.dwell.text())*1e-6
-            size_value = int(self.size.text())
+            dwell_value = float(self.dwell_input.text())*1e-6
+            size_value = int(self.size_input.text())
             
-            init_size_value = int(self.init_size.text())
-            runs_value = int(self.runs.text())
+            self.blank_image = np.zeros((size_value,size_value))
+            self.imax_before = self.ax_before.matshow(self.blank_image)
+            self.imax_after = self.ax_after.matshow(self.blank_image)        
             
-            func_value = self.func_names[self.func.currentIndex()]
-            metric_value = self.metric_names[self.metric.currentIndex()]
+            init_size_value = int(self.init_size_input.text())
+            iterations_value = int(self.iterations_input.text())
             
-            return_images = self.return_images.isChecked()
-            bscomp = self.bscomp.isChecked()
-            ccorr = self.ccorr.isChecked()
+            acq_func_value = self.acq_func_input_names[self.acq_func_input.currentIndex()]
+            metric_value = self.metric_input_names[self.metric_input.currentIndex()]
+            ucb_coefficient_value = float(self.ucb_coefficient_input.text())
+            
+            noise_level_value = float(self.noise_level_input.text())
+            
+            return_images = self.return_images_input.isChecked()
+            bscomp = self.bscomp_input.isChecked()
+            ccorr = self.ccorr_input.isChecked()
             
             self.worker = Worker(self.ac_ae.ae_main,                                 
                                  range_dict,
                                  init_size_value, 
-                                 runs_value,
-                                 func_value,
+                                 iterations_value,
+                                 acq_func_value,
                                  dwell_value, 
                                  size_value, 
                                  metric_value,
@@ -977,7 +1018,8 @@ class Widget(QWidget):
                                  return_all_f_re=True,
                                  return_final_f_re=True,
                                  custom_early_stop_flag=False,
-                                 custom_ucb_factor=None,
+                                 ucb_coefficient=ucb_coefficient_value,
+                                 noise_level=noise_level_value,
                                  init_hps=None,
                                  hp_bounds=None)
                                  
@@ -1000,21 +1042,8 @@ class Widget(QWidget):
         '''
         Function triggered by "accept" button. Accepts a suggested aberration change.
         '''
-        model_max = self.ac_ae.ae.gp_optimizer.ask(bounds=self.parameters, acquisition_function='maximum')['x'][0]
-        ab_keys = self.ac_ae.ab_keys
-        
-        if len(ab_keys) != len(model_max):
-            raise ValueError('ab_keys and model_max have different lengths')
-        
-        self.ac_ae.last_saved_correction = {}
-        for i in range(len(ab_keys)):
-            self.ac_ae.last_saved_correction[ab_keys[i]] = model_max[i]
-        
-        self.ac_ae.ab_only(self.ac_ae.last_saved_correction, 
-                           C1_defocus_flag=self.ac_ae.C1_defocus_flag,
-                           bscomp=self.ac_ae.bscomp)
+        self.ac_ae.accept_aberrations()
         self.undo_button.setEnabled(True)
-        
         self.statusPanel.append('Corrections Accepted')
         self.reset()
         
@@ -1029,11 +1058,7 @@ class Widget(QWidget):
         '''
         Function triggered by "undo" button. Reverses the last accepted aberration change.
         '''
-        self.ac_ae.ab_only(self.ac_ae.last_saved_correction, 
-                           C1_defocus_flag=self.ac_ae.C1_defocus_flag, 
-                           undo=True, bscomp=self.ac_ae.bscomp)
-        
-        self.ac_ae.last_saved_correction = {}
+        self.ac_ae.undo_last()
         self.undo_button.setEnabled(False)
         
     def reset(self):
@@ -1045,31 +1070,31 @@ class Widget(QWidget):
         self.continue_button.setEnabled(False)
         self.start_button.setEnabled(True)
         
-        size = int(self.size.text())
+        size = int(self.size_input.text())
         self.blank_image = np.zeros((size,size))
         
-        self.ax_before.matshow(self.blank_image)
+        self.imax_before.set_data(self.blank_image)
         self.canvas_before.draw()
         
-        self.ax_after.matshow(self.blank_image)
+        self.imax_after.set_data(self.blank_image)
         self.canvas_after.draw()
         
-        self.ax_surrogate.matshow(self.blank_surrogate)
+        self.imax_surrogate.set_data(self.blank_surrogate)
         self.canvas_surrogate.draw()
         #if not self.ac_ae.SIM: self.ac_ae.ClientSocket.close() # Close once everything's done
     
     def continue_func(self):
         '''
-        Function triggered by "continue" button. Continues the optimization run by 'continue_runs'
+        Function triggered by "continue" button. Continues the optimization run by 'extra_iterations'
         '''
         self.ac_ae.stop = False
         
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         
-        continue_runs_value = int(self.continue_runs.text())
+        extra_iterations_value = int(self.extra_iterations_input.text())
         
-        self.worker = Worker(self.ac_ae.continue_training, continue_runs=continue_runs_value)
+        self.worker = Worker(self.ac_ae.continue_training, extra_iterations=extra_iterations_value)
         self.thread_pool = QThreadPool()
         self.thread_pool.setMaxThreadCount(2)
         
@@ -1094,7 +1119,8 @@ class Widget(QWidget):
         '''
         f_re = pickle.loads(reply)
         if len(f_re.shape)==2:
-            self.ax_surrogate.matshow(f_re)
+            self.imax_surrogate.set_data(f_re)
+            self.imax_surrogate.set_clim(f_re.min(), f_re.max())
             self.canvas_surrogate.draw()
         
     @pyqtSlot(bytes) # connects to pyqtSignal object in receiver
@@ -1106,10 +1132,12 @@ class Widget(QWidget):
         image = im_dict['image']
         panel = im_dict['panel']
         if panel == 0:
-            self.ax_before.matshow(image)
+            self.imax_before.set_data(image)
+            self.imax_before.set_clim(image.min(), image.max())
             self.canvas_before.draw()
         else:
-            self.ax_after.matshow(image)
+            self.imax_after.set_data(image)
+            self.imax_after.set_clim(image.min(), image.max())
             self.canvas_after.draw()
     
     @pyqtSlot(int) # connects to pyqtSignal object in receiver
@@ -1125,6 +1153,18 @@ class Widget(QWidget):
     
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    font = QFont('Sans Serif', 8)
+    app.setFont(font, 'QLabel')
+    app.setFont(font, 'QPushButton')
+    app.setFont(font, 'QComboBox')
+    app.setFont(font, 'QLineEdit')
+    app.setFont(font, 'QCheckBox')
+    app.setFont(font, 'QTextEdit')
     w = Widget()
     w.show()
     sys.exit(app.exec_())
+
+'''
+To-do
+Plot points on scatter - Unimportant
+'''

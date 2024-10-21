@@ -1,5 +1,7 @@
 # BEACON (Bayesian-Enhanced Aberration Correction and Optimization Network)
 
+![Intro Figure](https://github.com/user-attachments/assets/a95c1fe3-f906-45b1-90ea-ab05471ab26d)
+
 # Requirements
 Microscope computer
 - CEOS RPC Gateway

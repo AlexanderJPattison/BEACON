@@ -13,7 +13,7 @@ BEACON computer
 - Python modules: gpcam 4.0.0, numpy, sys, pickle, pyzmq, matplotlib, pyqt
 
 # Installation
-BEACON uses a client-server model that allows the Bayesian optimization to be handled by a different computer to the one controlling the microscope (they can also be run on the same computer). You will need to edit the host and port names in GUI_client.py on lines 76 and 77 appropriately. If the CEOS RPC Gateway is being run on a different computer to the BEACON server, you will need to include the host and port names in the initialization of CorrectorCommands() in line 229 of Server.py.
+BEACON uses a client-server model that allows the Bayesian optimization to be handled by a different computer to the one controlling the microscope (they can also be run on the same computer).
 
 1) Clone or download this repository
 2) Move Server.py to the computer controlling the microscope and the CEOS corrector (Microscope computer)
@@ -21,5 +21,6 @@ BEACON uses a client-server model that allows the Bayesian optimization to be ha
 
 # Running BEACON
 1) Open the CEOS RPC Gateway on your microscope computer
-2) Run Server.py on your microscope computer
-3) Run GUI_Client.py wherever it is installed
+2) On your microscope computer, run `python Server.py --serverport <IP port address for server> --rpchost <IP host address of CEOS RPC gateway> --rpcport <IP port address of CEOS RPC gateway>`
+3) On your BEACON computer, run `python GUI_Client.py --serverhost <IP host address of server> --serverport <IP port address of server>`
+Note: Default IP addresses are: `--serverhost 'localhost', --serverport 7001, --rpchost 'localhost', --rpcport 7072`

@@ -23,4 +23,5 @@ BEACON uses a client-server model that allows the Bayesian optimization to be ha
 1) Open the CEOS RPC Gateway on your microscope computer
 2) On your microscope computer, run `python Server.py --serverport <IP port address for server> --rpchost <IP host address of CEOS RPC gateway> --rpcport <IP port address of CEOS RPC gateway>`
 3) On your BEACON computer, run `python GUI_Client.py --serverhost <IP host address of server> --serverport <IP port address of server>`
+
 Note: Default IP addresses are: `--serverhost 'localhost', --serverport 7001, --rpchost 'localhost', --rpcport 7072`

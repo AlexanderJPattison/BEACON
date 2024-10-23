@@ -1156,8 +1156,6 @@ if __name__ == "__main__":
     host = args.serverhost
     port = args.serverport
     
-    host = '192.168.0.24'
-    
     app = QApplication(sys.argv)
     font = QFont('Sans Serif', 8)
     app.setFont(font, 'QLabel')

@@ -8,7 +8,7 @@ Created on Fri Sep 15 10:14:26 2023
 import zmq
 import numpy as np
 import pickle
-
+import argparse
 import socket
 import json
 import pynetstring
@@ -224,12 +224,14 @@ class TIA_control():
         return image_data
 
 class CEOS_RPC_control():
-    def __init__(self):
+    def __init__(self, rpchost, rpcport):
+        print('Attempting to connecting to CEOS RPC gateway at '+str(rpchost)+':'+str(rpcport))
         try:
-            self.ceos_corrector = CorrectorCommands()
-            info = self.ceos_corrector.getInfo()
+            self.ceos_corrector = CorrectorCommands(rpchost, rpcport)
+            self.ceos_corrector.getInfo()
+            print('Connected')
         except ConnectionRefusedError:
-            print('Start the RPC gateway')
+            print('Could not connect to RPC gateway')
             exit()
     
     def change_aberration(self, name, value, select):
@@ -250,14 +252,11 @@ class CEOS_RPC_control():
         self.ceos_corrector.correctAberration(name=name, value=value, select=select)
 
 class BEACON_Server():
-    def __init__(self):
+    def __init__(self, port, rpchost, rpcport, sim=False):
         
-        self.SIM = False
-        if self.SIM:
-            port = 5557
-        else:
-            port = 7001
-            self.corrector = CEOS_RPC_control() 
+        self.SIM = sim
+        if not self.SIM:
+            self.corrector = CEOS_RPC_control(rpchost, rpcport) 
             self.microscope = TIA_control()
         
         context = zmq.Context()
@@ -683,6 +682,17 @@ class BEACON_Server():
         else:
             return qval
     
-
 if __name__ == '__main__':
-    server = BEACON_Server()
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--serverport', action='store', type=int, default=7001, help='server port')
+    parser.add_argument('--rpchost', action='store', type=str, default='localhost', help='rpc host')
+    parser.add_argument('--rpcport', action='store', type=int, default=7072, help='rpc port')
+    
+    args = parser.parse_args()
+    
+    serverport = args.serverport
+    rpchost = args.rpchost
+    rpcport = args.rpcport
+    
+    server = BEACON_Server(serverport, rpchost, rpcport)

@@ -12,6 +12,7 @@ import pickle
 import time
 import zmq
 import matplotlib.pyplot as plt
+import argparse
 
 from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.figure import Figure
@@ -48,10 +49,10 @@ class Worker(QRunnable):
 
 
 class BEACON_Client():
-    def __init__(self):
+    def __init__(self, host, port, SIM=False, stop=False):
         
-        self.stop = False
-        self.SIM = False
+        self.stop = stop
+        self.SIM = SIM
         self.last_saved_correction = {}
         self.image_list = []
         self.ab_select = {
@@ -68,24 +69,17 @@ class BEACON_Client():
                           'S3_x': 'coarse',
                           'S3_y': 'coarse',
                           }
-
-        if self.SIM:
-            host = '127.0.0.1'
-            port = 5557
-        else:
-            host = '192.168.0.24'
-            port = 7001
         
         try:
             context = zmq.Context()
             self.ClientSocket = context.socket(zmq.REQ)
             self.ClientSocket.connect(f"tcp://{host}:{port}")
-            print('Connected')
+            print(f'Connected to BEACON server at {host}:{port}')
         except ConnectionRefusedError:
             print('Start the BEACON server')
             exit()
         
-        SOCKET_TEST = False
+        SOCKET_TEST = True
         if SOCKET_TEST:
             d = {'type': 'ac',
                  'ab_values': {'C1': 0},
@@ -772,7 +766,7 @@ class BEACON_Client():
         self.model_max_2 = self.ae_2.gp_optimizer.ask(bounds=self.parameters, acquisition_function='maximum')['x'][0]
 
 class Widget(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, host, port, parent=None):
         '''
         Initializes the GUI
         '''
@@ -954,7 +948,7 @@ class Widget(QWidget):
         
         print('GUI ready')
         
-        self.ac_ae = BEACON_Client()
+        self.ac_ae = BEACON_Client(host, port)
         
     def start_func(self):
         '''
@@ -1152,6 +1146,18 @@ class Widget(QWidget):
             self.continue_button.setEnabled(True)
     
 if __name__ == "__main__":
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--serverhost', action='store', type=str, default='localhost', help='server host')
+    parser.add_argument('--serverport', action='store', type=int, default=7001, help='server port')
+    
+    args = parser.parse_args()
+    
+    host = args.serverhost
+    port = args.serverport
+    
+    host = '192.168.0.24'
+    
     app = QApplication(sys.argv)
     font = QFont('Sans Serif', 8)
     app.setFont(font, 'QLabel')
@@ -1160,7 +1166,7 @@ if __name__ == "__main__":
     app.setFont(font, 'QLineEdit')
     app.setFont(font, 'QCheckBox')
     app.setFont(font, 'QTextEdit')
-    w = Widget()
+    w = Widget(host, port)
     w.show()
     sys.exit(app.exec_())
 

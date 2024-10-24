@@ -49,7 +49,7 @@ class Worker(QRunnable):
 
 
 class BEACON_Client():
-    def __init__(self, host, port, SIM=False, stop=False):
+    def __init__(self, host, port, SIM=False, SOCKET_TEST=False, stop=False):
         
         self.stop = stop
         self.SIM = SIM
@@ -79,7 +79,6 @@ class BEACON_Client():
             print('Start the BEACON server')
             exit()
         
-        SOCKET_TEST = True
         if SOCKET_TEST:
             d = {'type': 'ac',
                  'ab_values': {'C1': 0},
@@ -333,7 +332,7 @@ class BEACON_Client():
                 f_re = self.get_f_re(obj)
                 self.f_re_list.append(f_re)
                 if self.figure_callback is not None:
-                    figure_reply = pickle.dumps(f_re)
+                    figure_reply = pickle.dumps((f_re, obj.x_data, obj.y_data))
                     self.figure_callback.emit(figure_reply)
             '''
             elif ndims==3 or ndims==4:
@@ -496,7 +495,7 @@ class BEACON_Client():
         status_callback : pyqt worker signal
             pyqt worker signal for GUI status bar
         figure_callback : pyqt worker signal
-            pyqt worker signal for GUI figure
+            pyqt worker signal for GUI figure (surrogate model)
         images_callback : pyqt worker signal
             pyqt worker signal for GUI images plotting
         stopped_callback : pyqt worker signal
@@ -569,7 +568,7 @@ class BEACON_Client():
         if len(self.init_hps)!=len(self.hp_bounds): raise ValueError('init_hps and hp_bounds have different sizes')
         
         if self.status_callback is not None:
-            self.status_callback.emit(pickle.dumps('Normalising'))
+            self.status_callback.emit(pickle.dumps('Normalizing'))
         
         self.set_ref(dwell, size)
         
@@ -877,6 +876,7 @@ class Widget(QWidget):
         self.ax_surrogate.set_axis_off()
         self.ax_surrogate.axis('equal')
         self.imax_surrogate = self.ax_surrogate.matshow(self.blank_surrogate)
+        self.imax_surrogate_points = self.ax_surrogate.scatter([],[], s=200, cmap='magma')
         
         self.fig_surrogate.set_tight_layout(True)
         self.canvas_surrogate = FigureCanvas(self.fig_surrogate)
@@ -979,8 +979,8 @@ class Widget(QWidget):
             size_value = int(self.size_input.text())
             
             self.blank_image = np.zeros((size_value,size_value))
-            self.imax_before = self.ax_before.matshow(self.blank_image)
-            self.imax_after = self.ax_after.matshow(self.blank_image)        
+            self.imax_before.set_data(self.blank_image)
+            self.imax_after.set_data(self.blank_image)        
             
             init_size_value = int(self.init_size_input.text())
             iterations_value = int(self.iterations_input.text())
@@ -1073,7 +1073,8 @@ class Widget(QWidget):
         self.imax_after.set_data(self.blank_image)
         self.canvas_after.draw()
         
-        self.imax_surrogate.set_data(self.blank_surrogate)
+        self.imax_surrogate.set_data(self.blank_surrogate, origin='lower')
+        self.imax_surrogate_points.set_offsets([],[])
         self.canvas_surrogate.draw()
         #if not self.ac_ae.SIM: self.ac_ae.ClientSocket.close() # Close once everything's done
     
@@ -1111,10 +1112,14 @@ class Widget(QWidget):
         '''
         Updates figure panel.
         '''
-        f_re = pickle.loads(reply)
+        f_re, x_data, y_data = pickle.loads(reply)
         if len(f_re.shape)==2:
             self.imax_surrogate.set_data(f_re)
             self.imax_surrogate.set_clim(f_re.min(), f_re.max())
+            x_data2 = np.interp(x_data, (-1,1), (0, 100))
+            self.imax_surrogate_points.set_offsets(x_data2)
+            self.imax_surrogate_points.set_array(y_data)
+            self.imax_surrogate_points.set_cmap('magma')
             self.canvas_surrogate.draw()
         
     @pyqtSlot(bytes) # connects to pyqtSignal object in receiver
@@ -1155,6 +1160,8 @@ if __name__ == "__main__":
     
     host = args.serverhost
     port = args.serverport
+    
+    host = '192.168.0.24'
     
     app = QApplication(sys.argv)
     font = QFont('Sans Serif', 8)

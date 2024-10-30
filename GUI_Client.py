@@ -619,6 +619,7 @@ class BEACON_Client():
         for i in range(iterations):
             if not self.stop:
                 N+=1
+                # try statement here
                 self.ae.go(N = N, retrain_globally_at=retraining_list, # retraining list in function declaration
                            acq_func_opt_setting = lambda number: "global",
                            #custom_early_stop_flag=custom_early_stop_flag # Resurrect this
@@ -629,11 +630,11 @@ class BEACON_Client():
         self.model_max = self.ae.gp_optimizer.ask(bounds=self.parameters, acquisition_function='maximum')['x'][0]
         self.model_max_val = self.ae.gp_optimizer.ask(bounds=self.parameters, acquisition_function='maximum')['f(x)'][0]
         mm_ab_keys = list(self.ranges.keys())
-        mm_ab_values = {}
+        self.mm_ab_values = {}
         
         for i in range(len(self.ranges)):
             self.model_max[i] = np.interp(self.model_max[i], (-1, 1), (self.range_values[i][0], self.range_values[i][1]))
-            mm_ab_values[mm_ab_keys[i]] = self.model_max[i]*1e-9
+            self.mm_ab_values[mm_ab_keys[i]] = self.model_max[i]*1e-9
         
         mmstr = np.array2string(self.model_max, precision=2, floatmode='fixed')
         print("model max =", mmstr, self.model_max_val)
@@ -648,7 +649,7 @@ class BEACON_Client():
         Response = self.get_image({})
         _, self.initial_image = Response['reply_data']
         
-        Response = self.get_image(mm_ab_values)
+        Response = self.get_image(self.mm_ab_values)
         _, self.final_image = Response['reply_data']
         
         if self.return_images and self.images_callback is not None:
@@ -709,22 +710,18 @@ class BEACON_Client():
             print('self.ae does not exist')
     
     def accept_aberrations(self):
-        model_max = self.ae.gp_optimizer.ask(bounds=self.parameters, acquisition_function='maximum')['x'][0]
-        ab_keys = self.ab_keys
-        
-        if len(ab_keys) != len(model_max):
-            raise ValueError('ab_keys and model_max have different lengths')
-        
-        self.last_saved_correction = {}
-        for i in range(len(ab_keys)):
-            self.last_saved_correction[ab_keys[i]] = model_max[i]
-        
-        self.ab_only(self.last_saved_correction, 
+        self.ab_only(self.mm_ab_values,
                      C1_defocus_flag=self.C1_defocus_flag,
                      bscomp=self.bscomp)
         
+        self.last_saved_correction = self.mm_ab_values
+        
     def undo_last(self):
-        self.ab_only(self.last_saved_correction, 
+        undo_ab_values = self.mm_ab_values.copy()
+        for name in list(undo_ab_values.keys()):
+            undo_ab_values[name] = -undo_ab_values[name]
+        print(undo_ab_values)
+        self.ab_only(undo_ab_values, 
                      C1_defocus_flag=self.C1_defocus_flag, 
                      undo=True, bscomp=self.bscomp)
         
@@ -904,7 +901,7 @@ class Widget(QWidget):
         self.fig_before, self.ax_before = plt.subplots(1,1)
         self.ax_before.set_axis_off()
         self.ax_before.axis('equal') 
-        self.imax_before = self.ax_before.matshow(self.blank_image)
+        self.imax_before = self.ax_before.matshow(self.blank_image, origin='lower')
         
         self.fig_before.set_tight_layout(True)
         self.canvas_before = FigureCanvas(self.fig_before)
@@ -912,7 +909,7 @@ class Widget(QWidget):
         self.fig_after, self.ax_after = plt.subplots(1,1)
         self.ax_after.set_axis_off()
         self.ax_after.axis('equal')
-        self.imax_after = self.ax_after.matshow(self.blank_image)
+        self.imax_after = self.ax_after.matshow(self.blank_image, origin='lower')
         
         self.fig_after.set_tight_layout(True)
         self.canvas_after = FigureCanvas(self.fig_after)
@@ -1073,8 +1070,8 @@ class Widget(QWidget):
         self.imax_after.set_data(self.blank_image)
         self.canvas_after.draw()
         
-        self.imax_surrogate.set_data(self.blank_surrogate, origin='lower')
-        self.imax_surrogate_points.set_offsets([],[])
+        self.imax_surrogate.set_data(self.blank_surrogate)
+        self.imax_surrogate_points.set_offsets(np.empty((1,2)))
         self.canvas_surrogate.draw()
         #if not self.ac_ae.SIM: self.ac_ae.ClientSocket.close() # Close once everything's done
     
@@ -1131,11 +1128,11 @@ class Widget(QWidget):
         image = im_dict['image']
         panel = im_dict['panel']
         if panel == 0:
-            self.imax_before.set_data(image)
+            self.imax_before.set_data(np.rot90(image))
             self.imax_before.set_clim(image.min(), image.max())
             self.canvas_before.draw()
         else:
-            self.imax_after.set_data(image)
+            self.imax_after.set_data(np.rot90(image))
             self.imax_after.set_clim(image.min(), image.max())
             self.canvas_after.draw()
     

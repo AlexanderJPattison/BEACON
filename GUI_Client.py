@@ -84,7 +84,8 @@ class BEACON_Client():
                  'ab_values': {'C1': 0},
                  'ab_select': {'C1': None},
                  'dwell': 1e-6,
-                 'size': 512,
+                 'shape': (256, 256),
+                 'offset': (0, 0),
                  'metric': 'var',
                  'C1_defocus_flag': True,
                  'return_images': False,
@@ -121,7 +122,7 @@ class BEACON_Client():
         response = pickle.loads(self.ClientSocket.recv())
         return response
     
-    def set_ref(self, dwell, size, return_images=True):
+    def set_ref(self, dwell, shape, offset=(0,0), return_images=True):
         '''
         Sets the reference image.
         
@@ -129,15 +130,16 @@ class BEACON_Client():
         ----------
         dwell : float
             Dwell time in seconds
-        size : int
-            Image size in pixels
+        shape : tuple or array
+            Image shape in pixels
         return_images : bool
             Flag to return image to the GUI display
         '''
         d = {'type': 'ref',
              'dwell': dwell,
-             'size': size,
-             'return_images': return_images
+             'shape': shape,
+             'offset': offset,
+             'return_images': return_images,
              }
         Response = self.send_traffic(d)
         if self.status_callback is not None:
@@ -166,7 +168,8 @@ class BEACON_Client():
              'ab_values': ab_values,
              'ab_select': self.ab_select,
              'dwell': self.dwell,
-             'size': self.size,
+             'shape': self.shape,
+             'offset': self.offset,
              'metric': self.metric,
              'C1_defocus_flag': self.C1_defocus_flag,
              'return_images': self.return_images or self.return_dict,
@@ -207,18 +210,18 @@ class BEACON_Client():
         Acquire images for normalization calculations
         '''
         #ab_keys = list(ranges.keys())
-        norm_points = [{},{},{}]
+        self.norm_points = [{},{},{}]
         
         for i in range(len(self.ab_keys)):
-            norm_points[0][f'{self.ab_keys[i]}'] = self.ranges[f'{self.ab_keys[i]}'][0]*1e-9
-            norm_points[1][f'{self.ab_keys[i]}'] = 0*1e-9
-            norm_points[2][f'{self.ab_keys[i]}'] = self.ranges[f'{self.ab_keys[i]}'][1]*1e-9
+            self.norm_points[0][f'{self.ab_keys[i]}'] = self.ranges[f'{self.ab_keys[i]}'][0]*1e-9
+            self.norm_points[1][f'{self.ab_keys[i]}'] = 0*1e-9
+            self.norm_points[2][f'{self.ab_keys[i]}'] = self.ranges[f'{self.ab_keys[i]}'][1]*1e-9
         
         self.norm_values = np.zeros(3)
         self.norm_image_dict = [None]*3
         
         for i in range(3):
-            ab_values = norm_points[i]
+            ab_values = self.norm_points[i]
             Response = self.get_image(ab_values)
             self.norm_values[i], self.norm_image_dict[i] = Response['reply_data']
 
@@ -293,8 +296,6 @@ class BEACON_Client():
                 ret_value = Response['reply_data']
             
             entry["y_data"] = (ret_value-self.norm_min)/self.norm_range
-            #entry["variance"] = abs(0.01*ret_value/self.norm_range)**2 # NOT SURE ABOUT THIS
-            #print(self.dwell, self.size, ret_value)
 
         return data
 
@@ -393,10 +394,11 @@ class BEACON_Client():
         self.BEACON_dict = {'x': self.ae.x_data, # NEEDS TO BE RESCALED
                            'y': self.ae.y_data,
                            'range_dict': self.ranges,
-                           'init_size': self.init_size_input,
+                           'init_size': self.init_size,
                            'func': self.acq_func,
                            'dwell': self.dwell,
-                           'size': self.size,
+                           'shape': self.shape,
+                           'offset': self.offset,
                            'metric': self.metric,
                            'bscomp': self.bscomp,
                            'ccorr': self.ccorr,
@@ -424,12 +426,14 @@ class BEACON_Client():
                 iterations,
                 func,
                 dwell, 
-                size, 
+                shape,
+                offset,
                 metric,
                 return_images,
                 bscomp,
                 ccorr,
                 C1_defocus_flag=True,
+                include_norm_runs=True,
                 ab_select=None,
                 return_dict=False,
                 return_all_f_re=False,
@@ -459,8 +463,10 @@ class BEACON_Client():
             Name of the function to be used [WHAT OPTIONS?]
         dwell : float
             Dwell time in seconds
-        size : int
-            Image size in pixels
+        shape : tuple or array
+            Image shape in pixels
+        offset : tuple or array
+            Offset in pixels
         metric : str
             Name of the metric to be used (normalized variance, variance, standard deviation)
         return_images : bool
@@ -529,7 +535,8 @@ class BEACON_Client():
         self.acq_func = self.custom_ucb_func
         
         self.dwell = dwell
-        self.size = size
+        self.shape = shape
+        self.offset = offset
         self.metric = metric
         self.bscomp = bscomp
         self.ccorr = ccorr
@@ -537,9 +544,9 @@ class BEACON_Client():
         self.return_images = return_images
         if self.return_images:
             if self.ccorr:
-                self.image_stack = np.zeros((0,int(self.size/2),int(self.size/2))) # normally /2
+                self.image_stack = np.zeros((0,int(self.shape[0]/2),int(self.shape[1]/2))) # normally /2
             else:
-                self.image_stack = np.zeros((0,int(self.size),int(self.size)))
+                self.image_stack = np.zeros((0,int(self.shape[0]),int(self.shape[1])))
             self.resolutions = []
         self.C1_defocus_flag = C1_defocus_flag
         
@@ -570,7 +577,7 @@ class BEACON_Client():
         if self.status_callback is not None:
             self.status_callback.emit(pickle.dumps('Normalizing'))
         
-        self.set_ref(dwell, size)
+        self.set_ref(dwell, shape)
         
         self.normalization()
         self.norm_min = np.min(self.norm_values)
@@ -581,6 +588,13 @@ class BEACON_Client():
         #self.norm_min = 0 # FOR TESTING ONLY
         #self.norm_range = 1 # FOR TESTING ONLY
         
+        '''
+        # Todo: FINISH THIS. NEEDS TO TAKE X AND Y INDEPENDENTLY AND FEED THEM INTO self.ae
+        if include_norm_runs:
+            n = self.init_size-3
+            
+        
+        '''
         self.ae = AutonomousExperimenterGP(self.parameters,
                                            self.init_hps,
                                            self.hp_bounds,
@@ -642,10 +656,7 @@ class BEACON_Client():
         #print(mm_ab_values)
                
         self.ccorr = False
-        '''
-        self.size = 1024
-        self.dwell = 4e-6
-        '''
+        
         Response = self.get_image({})
         _, self.initial_image = Response['reply_data']
         
@@ -807,17 +818,17 @@ class Widget(QWidget):
             self.fine_coarse.append(fc_toggle)
             abOptionsLayout.addWidget(self.fine_coarse[i],i+1,3)
         
+        #self.check_boxes[0].setChecked(True)
         self.check_boxes[1].setChecked(True)
         self.check_boxes[2].setChecked(True)
         
         self.dwell_input = QLineEdit('2')
-        self.size_input = QLineEdit('512')
         self.metric_input = QComboBox()
-        self.metric_input.addItems(['Normalised Variance', 'Variance', 'Standard Deviation'])
-        self.metric_input_names = ['normvar', 'var', 'std']
+        self.metric_input.addItems(['Normalised Variance', 'Variance', 'Standard Deviation', 'Defocus Slice'])
+        self.metric_input_names = ['normvar', 'var', 'std', 'df_slice']
         self.init_size_input = QLineEdit('5')
-        self.iterations_input = QLineEdit('10')
-        self.extra_iterations_input = QLineEdit('10')
+        self.iterations_input = QLineEdit('5')
+        self.extra_iterations_input = QLineEdit('5')
         self.acq_func_input = QComboBox()
         self.acq_func_input.addItems(['Upper Confidence Bound'])
         self.acq_func_input_names = ['ucb']
@@ -829,9 +840,21 @@ class Widget(QWidget):
         self.ccorr_input.setChecked(True)
         self.bscomp_input = QCheckBox()
         
+        shapeLayout = QGridLayout()
+        self.x_size_input = QLineEdit('512')
+        self.y_size_input = QLineEdit('512')
+        self.x_offset_input = QLineEdit('0')
+        self.y_offset_input = QLineEdit('0')
+        shapeLayout.addWidget(QLabel('Image Shape (x, y)'),0,0)
+        shapeLayout.addWidget(self.x_size_input,0,1)
+        shapeLayout.addWidget(self.y_size_input,0,2)
+        shapeLayout.addWidget(QLabel('Offset (x, y)'),1,0)
+        shapeLayout.addWidget(self.x_offset_input,1,1)
+        shapeLayout.addWidget(self.y_offset_input,1,2)
+        
+        
         settingsLayout = QFormLayout()
         settingsLayout.addRow('Dwell Time (us)', self.dwell_input)
-        settingsLayout.addRow('Image Size (min = 128)', self.size_input)
         settingsLayout.addRow('Metric', self.metric_input)
         settingsLayout.addRow('Initial Iterations', self.init_size_input)
         settingsLayout.addRow('Optimization Iterations', self.iterations_input)
@@ -860,6 +883,7 @@ class Widget(QWidget):
         buttonsLayout.addWidget(self.undo_button, 0, 3)
         
         controlPanelLayout.addLayout(abOptionsLayout)
+        controlPanelLayout.addLayout(shapeLayout)
         controlPanelLayout.addLayout(settingsLayout)
         controlPanelLayout.addLayout(buttonsLayout)
         
@@ -895,13 +919,13 @@ class Widget(QWidget):
         
         imagePanelLayout = QVBoxLayout()
         
-        im_size = int(self.size_input.text())
-        self.blank_image = np.zeros((im_size,im_size))
+        shape = (int(self.x_size_input.text()), int(self.y_size_input.text())) # NEEDS CHANGING
+        self.blank_image = np.zeros((shape[1],shape[0]))
         
         self.fig_before, self.ax_before = plt.subplots(1,1)
         self.ax_before.set_axis_off()
         self.ax_before.axis('equal') 
-        self.imax_before = self.ax_before.matshow(self.blank_image, origin='lower')
+        self.imax_before = self.ax_before.matshow(self.blank_image)
         
         self.fig_before.set_tight_layout(True)
         self.canvas_before = FigureCanvas(self.fig_before)
@@ -909,7 +933,7 @@ class Widget(QWidget):
         self.fig_after, self.ax_after = plt.subplots(1,1)
         self.ax_after.set_axis_off()
         self.ax_after.axis('equal')
-        self.imax_after = self.ax_after.matshow(self.blank_image, origin='lower')
+        self.imax_after = self.ax_after.matshow(self.blank_image)
         
         self.fig_after.set_tight_layout(True)
         self.canvas_after = FigureCanvas(self.fig_after)
@@ -973,9 +997,10 @@ class Widget(QWidget):
             self.start_button.setEnabled(True)
         else:
             dwell_value = float(self.dwell_input.text())*1e-6
-            size_value = int(self.size_input.text())
+            shape_value = (int(self.x_size_input.text()), int(self.y_size_input.text()))
+            offset_value = (int(self.x_offset_input.text()), int(self.y_offset_input.text()))
             
-            self.blank_image = np.zeros((size_value,size_value))
+            self.blank_image = np.zeros(shape_value)
             self.imax_before.set_data(self.blank_image)
             self.imax_after.set_data(self.blank_image)        
             
@@ -998,7 +1023,8 @@ class Widget(QWidget):
                                  iterations_value,
                                  acq_func_value,
                                  dwell_value, 
-                                 size_value, 
+                                 shape_value,
+                                 offset_value,
                                  metric_value,
                                  return_images,
                                  bscomp,
@@ -1061,8 +1087,8 @@ class Widget(QWidget):
         self.continue_button.setEnabled(False)
         self.start_button.setEnabled(True)
         
-        size = int(self.size_input.text())
-        self.blank_image = np.zeros((size,size))
+        shape = (int(self.x_size_input.text()), int(self.y_size_input.text()))
+        self.blank_image = np.zeros(shape)
         
         self.imax_before.set_data(self.blank_image)
         self.canvas_before.draw()
@@ -1128,10 +1154,12 @@ class Widget(QWidget):
         image = im_dict['image']
         panel = im_dict['panel']
         if panel == 0:
+            self.ax_before.axis('equal')
             self.imax_before.set_data(np.rot90(image))
             self.imax_before.set_clim(image.min(), image.max())
             self.canvas_before.draw()
         else:
+            self.ax_after.axis('equal')
             self.imax_after.set_data(np.rot90(image))
             self.imax_after.set_clim(image.min(), image.max())
             self.canvas_after.draw()

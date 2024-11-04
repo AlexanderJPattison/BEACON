@@ -125,6 +125,14 @@ class CorrectorCommands():
         '''
         return self.communicate('getInfo')
     
+    def measureC1A1(self):
+        """
+        Do a single C1A1(B2A2WD) measurement.
+        
+        :returns: a Deferred containing the aberrations as dict
+        """
+        return self.communicate('measureC1A1')
+    
 class TIA_control():
     def __init__(self):
         # Connect to the microscope
@@ -133,19 +141,75 @@ class TIA_control():
         self.Acq = self._microscope.Acquisition
         self.Ill = self._microscope.Illumination
         self.Proj = self._microscope.Projection
+        self.Stage = self._microscope.Stage
         
         # Connect to STEM
         detector0 = self.Acq.Detectors(0)
         # Add the first detector
         self.Acq.AddAcqDevice(detector0)
+        
+        self.TIA.ScanningServer().AcquireMode = 1 #0=continuous, 1=single
+        self.TIA.ScanningServer().ScanMode = 2 #0=spot, 1=line, 2=frame
+
+    def close_column_valve(self):
+        self._microscope.Vacuum.ColumnValvesOpen = False
+        print('Column valves closed')
+
+    def create_or_set_display_window(self, sizeX, sizeY):
+        self.window_name = 'BEACON image'
+        winlist = self.TIA.DisplayWindowNames()
+        found = False
+        for ii in range(winlist.count):
+            if winlist[ii] == self.window_name:
+                found = True
+                
+        if found:
+            self.w2D = self.TIA.FindDisplayWindow(self.window_name)
+            self.d1 = self.w2D.FindDisplay('Image 1 Display')
+            if self.d1 is not None:
+                self.disp = self.d1.Image
+            else:
+                self.d1 = self.w2D.addDisplay('Image 1 Display', 0,0,3,1)
+                self.disp = self.d1.AddImage('Image 1', sizeX, sizeY, self.TIA.Calibration2D(0,0,1,1,0,0))
+        else:
+            self.w2D = self.TIA.AddDisplayWindow()
+            self.w2D.name = self.window_name
+            self.d1 = self.w2D.addDisplay('Image 1 Display', 0,0,3,1)
+            self.disp = self.d1.AddImage('Image 1', sizeX, sizeY, self.TIA.Calibration2D(0,0,1,1,0,0))
+
+    def set_mag(self, mag):
+        self.Ill.StemMagnification = mag
+        print('Mag set to {}'.format(self.Ill.StemMagnification))
+        
+    def get_stage_pos(self):
+        ''' Get stage position '''
+        stageObj = self.Stage.Position
+        print('Stage position = {}'.format(stageObj))
+        return stageObj.X, stageObj.Y, stageObj.Z, stageObj.A, stageObj.B
+
+    def move_stage_delta(self, dX=0, dY=0, dZ=0, dA=0, dB=0):
+        ''' Move stage by delta value '''
+        #n = int('{}{}{}{}{}'.format(int(dB==1), int(dA==1), int(dZ==1), int(dY==1), int(dX==1)), 2)
+        n = 15
+        print('Moving by {}, {}, {}, {}, {}'.format(dX, dY, dZ, dA, dB))
+        stageObj = self.Stage.Position
+        stageObj.X += dX
+        stageObj.Y += dY
+        stageObj.Z += dZ
+        stageObj.A += dA
+        stageObj.B += dB
+        self.Stage.GoTo(stageObj, n)
+        #print('Stage moved to = {}'.format(self.Stage.Position()))
 
     def blank(self):
         ''' Blanks beam '''
         self.Ill.BeamBlanked = True
+        print('Beam blanked')
     
     def unblank(self):
         ''' Unblanks beam '''
         self.Ill.BeamBlanked = False
+        print('Beam unblanked')
     
     def change_defocus(self, df):
         '''
@@ -156,62 +220,106 @@ class TIA_control():
         df : float
             Amount of defocus to change (in metres)
         '''
+        print('Changing defocus by {}'.format(df))
         currentDF = self.Proj.Defocus
         self.Proj.Defocus = currentDF + df
-
-    def set_acquisition_parameters(self, binning, imsize, dwell_time):
+        print('Defocus set to {}'.format(self.Proj.Defocus))
+        
+    def microscope_acquire_image(self, dwell, shape, offset=(0,0)):
         '''
-        Sets image acquisition parameters
+        Acquire image in TIA
         
         Parameters
         ----------
-        binning : int
-            Binning level for image (4 for 1024, 8 for 512)
-        imsize : int
-            Size of image (0 = full size, 1 = half size, 2 = quarter size)
-        dwell_time : float
-            Dwell time (in seconds)
-        '''
-
-        myStemSearchParams = self.Acq.Detectors.AcqParams
-        myStemSearchParams.Binning = binning
-        myStemSearchParams.ImageSize = imsize
-        myStemSearchParams.DwellTime = dwell_time
-        self.Acq.Detectors.AcqParams = myStemSearchParams
-    
-    # NOT SURE WHETHER THIS IS MANDATORY OR NOT?
-    def get_image_parameters(self):
-        '''
-        Get image parameters
-        
-        Returns
-        -------
-        unitName : str
-            Units of the calibration (e.g. nm, um)
-        calX : float
-            x-calibration (nm per pixel)
-        calY : float
-            y-calibration (nm per pixel)
-        '''
-        
-        window1 = self.TIA.ActiveDisplayWindow()
-        Im1 = window1.FindDisplay(window1.DisplayNames[0]) #returns an image display object
-        unit1 = Im1.SpatialUnit #returns SpatialUnit object
-        unitName = unit1.unitstring #returns a string (such as nm)
-        calX = self.TIA.ScanningServer().ScanResolution
-        calY = self.TIA.ScanningServer().ScanResolution
-        
-        return unitName, calX, calY
-    
-    def microscope_acquire_image(self):
-        '''
-        Acquire image in TIA
+        dwell : float
+            Dwell time
+        shape : tuple, array
+            Image shape
+        offset : typle, array
+            Offset of image from current center (might be issues if more than one value is non-zero)
         
         Returns
         -------
         image_data : array
             Acquired image
         '''
+        
+        sizeX = shape[0]
+        sizeY = shape[1]
+        centerX = offset[0]
+        centerY = offset[1]
+        
+        print('Acquiring image with shape = {}, {}, offset = {}, {}'.format(sizeX, sizeY, centerX, centerY))
+        
+        if self.TIA.AcquisitionManager().IsAcquiring:
+            self.TIA.AcquisitionManager().Stop()
+        
+        self.create_or_set_display_window(sizeX, sizeY)
+
+        scrange = self.TIA.ScanningServer().GetTotalScanRange
+
+        length = np.maximum(sizeX, sizeY)
+        startX = scrange.StartX/length*sizeX
+        endX = scrange.EndX/length*sizeX
+        startY = scrange.StartY/length*sizeY
+        endY = scrange.EndY/length*sizeY
+        resolution = (endX-startX)/sizeX
+        
+        self.TIA.ScanningServer().SetFrameScan(self.TIA.Range2D(startX,startY,endX,endY), resolution) # can resolution be different in x and y?
+        self.TIA.ScanningServer().DwellTime = dwell
+        
+        calX = self.TIA.ScanningServer().ScanResolution
+        calY = self.TIA.ScanningServer().ScanResolution
+        
+        # Needed in case someone runs search between BEACON searches
+        self.TIA.ScanningServer().AcquireMode = 1 #0=continuous, 1=single
+        self.TIA.ScanningServer().ScanMode = 2 #0=spot, 1=line, 2=frame
+        
+        self.TIA.AcquisitionManager().LinkSignal('Analog3', self.d1.Image)
+        
+        self.unblank()
+        self.TIA.AcquisitionManager().Start()
+        while self.TIA.AcquisitionManager().IsAcquiring:
+            pass
+        self.blank()
+
+        data = self.disp.Data
+        image_data = np.array(data.Array)
+        unit1 = self.d1.SpatialUnit # returns SpatialUnit object
+        unitName = unit1.unitstring # returns a string (such as nm)
+
+        return image_data, calX, calY, unitName
+
+    def microscope_acquire_image_old(self, dwell, shape, offset=(0,0)):
+        '''
+        Acquire image in TIA
+        Todo: Remove this once you figure out the TIA window issue
+        
+        Parameters
+        ----------
+        dwell : float
+            Dwell time
+        shape : tuple, array
+            Image shape
+        offset : typle, array
+            Offset of image from current center (might be issues if more than one value is non-zero)
+        
+        Returns
+        -------
+        image_data : array
+            Acquired image
+        '''
+        if shape[0] > 512:
+            binning = 4
+        else:
+            binning = 8
+        
+        myStemSearchParams = self.Acq.Detectors.AcqParams
+        myStemSearchParams.Binning = binning
+        myStemSearchParams.ImageSize = 1 # Size of image (0 = full size, 1 = half size, 2 = quarter size)
+        myStemSearchParams.DwellTime = dwell
+        self.Acq.Detectors.AcqParams = myStemSearchParams
+        
         if self.TIA.AcquisitionManager().isAcquiring:
             self.TIA.AcquisitionManager().Stop()
         self.unblank()
@@ -221,7 +329,14 @@ class TIA_control():
             image_data = acquiredImageSet(0).AsSafeArray # get data as ndarray
         self.blank()
         
-        return image_data
+        window1 = self.TIA.ActiveDisplayWindow()
+        Im1 = window1.FindDisplay(window1.DisplayNames[0]) #returns an image display object
+        unit1 = Im1.SpatialUnit #returns SpatialUnit object
+        unitName = unit1.unitstring #returns a string (such as nm)
+        calX = self.TIA.ScanningServer().ScanResolution
+        calY = self.TIA.ScanningServer().ScanResolution
+
+        return image_data, calX, calY, unitName
 
 class CEOS_RPC_control():
     def __init__(self, rpchost, rpcport):
@@ -242,19 +357,17 @@ class CEOS_RPC_control():
         ----------
         name : str
             Name of aberration to be changed ('C1', 'A1', 'B2', 'A2', 'C3', 'A3', 'S3', 'We' (beam shift))
-        
         value : 2-element list or array
             Amount to change the aberration by (in metres)
-        
         select : str
             Use 'coarse' or 'fine' correction ('None' for C1 and C3)
         '''
         self.ceos_corrector.correctAberration(name=name, value=value, select=select)
 
 class BEACON_Server():
-    def __init__(self, port, rpchost, rpcport, sim=False):
+    def __init__(self, port, rpchost, rpcport, SIM=False, TEST=False):
         
-        self.SIM = sim
+        self.SIM = SIM
         if not self.SIM:
             self.corrector = CEOS_RPC_control(rpchost, rpcport) 
             self.microscope = TIA_control()
@@ -266,30 +379,19 @@ class BEACON_Server():
         
         self.refImage = None
         
-        ab_values = {'C1': 0.0}
-        ab_select = {'C1': None}
-        dwell_time = 1e-7
-        size = 512
-        metric = 'var'
-        C1_defocus_flag = False
-        return_images = False
-        bscomp = False
-        ccorr = False
-        
-        self.d = {'type': 'ac',
-                  'ab_values': ab_values,
-                  'ab_select': ab_select,
-                  'dwell': dwell_time,
-                  'size': size,
-                  'metric': metric,
-                  'C1_defocus_flag': C1_defocus_flag,
-                  'return_images': return_images,
-                  'bscomp': bscomp,
-                  'ccorr': ccorr,
-                  }
-        
-        TEST = False
         if TEST:
+            self.d = {'type': 'ac',
+                      'ab_values': {'C1': 0.0},
+                      'ab_select': {'C1': None},
+                      'dwell': 1e-7,
+                      'shape': (256, 256),
+                      'offset': (0, 0),
+                      'metric': 'var',
+                      'C1_defocus_flag': True,
+                      'return_images': False,
+                      'bscomp': False,
+                      'ccorr': False,
+                      }
             qval = self.acquire_image_with_aberrations()
             print(qval)
 
@@ -306,13 +408,35 @@ class BEACON_Server():
                 reply_message = 'ac'
                 reply_data = self.acquire_image_with_aberrations()
             elif instruction == 'ref':
-                self.refImage, _, _, _ = self.acquire_image(self.d['dwell'], self.d['size'])
+                self.refImage, _, _, _ = self.microscope.microscope_acquire_image(self.d['dwell'], self.d['shape'])
                 reply_message = 'reference image set'
                 reply_data = self.refImage
             elif instruction == 'ab_only':
                 self.abChange(self.d['ab_values'], self.d['ab_select'], self.d['C1_defocus_flag'],
                               undo=False, bscomp=self.d['bscomp'])
                 reply_message = 'aberrations changed'
+                reply_data = None
+            elif instruction == 'tableau':
+                reply_message = 'tableau measured'
+                reply_data = self.tableau_measurement()
+            elif instruction == 'image':
+                reply_message = 'image acquired'
+                reply_data = self.microscope.microscope_acquire_image_old(self.d['dwell'], self.d['shape'], self.d['offset'])
+            elif instruction == 'move_stage':
+                print(self.d)
+                self.microscope.move_stage_delta(self.d['dX'], self.d['dY'], self.d['dZ'], self.d['dA'], self.d['dB'])
+                reply_message = 'stage moved'
+                reply_data = None
+            elif instruction == 'set_mag':
+                self.microscope.set_mag(self.d['mag'])
+                reply_message = 'mag changed'
+                reply_data = None
+            elif instruction == 'close_column_valve':
+                self.microscope.close_column_valve()
+                if not self.microscope._microscope.Vacuum.ColumnValvesOpen:
+                    reply_message = 'column valve closed'
+                else:
+                    reply_message = 'column valve NOT closed'
                 reply_data = None
             else:
                 reply_message = None
@@ -442,7 +566,7 @@ class BEACON_Server():
         s = image.shape[0]//b
         return image.reshape((s, b, s, b)).mean(axis=3).mean(axis=1)
 
-    def correlate_func(self, im0, im1, mode='full'):
+    def correlate_func(self, im0, im1):
         '''
         Cross-correlate two images
         
@@ -452,46 +576,21 @@ class BEACON_Server():
             1st image
         im1 : array
             2nd image
-        mode : str
-            Select which mode by which to perform cross-correlation
             
         Returns
         -------
         Cross-correlation value
         '''
-        if mode == 'full':
-            p0 = np.zeros((im0.shape[0] + im1.shape[0], im0.shape[1] + im1.shape[1]))
-            p1 = np.zeros((im0.shape[0] + im1.shape[0], im0.shape[1] + im1.shape[1]))
-            p0[p0.shape[0]//2-im0.shape[0]//2:p0.shape[0]//2-im0.shape[0]//2 + im0.shape[0],
-               p0.shape[1]//2-im0.shape[1]//2:p0.shape[1]//2-im0.shape[1]//2 + im0.shape[1]] = im0
-            p1[p1.shape[0]//2-im1.shape[0]//2:p1.shape[0]//2-im1.shape[0]//2 + im1.shape[0],
-               p1.shape[1]//2-im1.shape[1]//2:p1.shape[1]//2-im1.shape[1]//2 + im1.shape[1]] = im1
-            f0 = np.fft.fft2(p0)
-            f1 = np.fft.fft2(p1)
-            f0 *= np.conj(f1)
-            c = np.fft.ifft2(f0)
-            return np.fft.fftshift(c.real)
-        if mode == 'same':
-            p0 = np.zeros((im0.shape[0], im0.shape[1]))
-            p1 = np.zeros((im0.shape[0], im0.shape[1]))
-            p1[p1.shape[0]//2-im1.shape[0]//2:p1.shape[0]//2-im1.shape[0]//2 + im1.shape[0],
-               p1.shape[1]//2-im1.shape[1]//2:p1.shape[1]//2-im1.shape[1]//2 + im1.shape[1]] = im1
-            f0 = np.fft.fft2(im0)
-            f1 = np.fft.fft2(p1)
-            f0 *= np.conj(f1)
-            c = np.fft.ifft2(f0)
-            return np.fft.fftshift(c.real)
-        if mode == 'valid':
-            p0 = np.zeros((im0.shape[0], im0.shape[1]))
-            p1 = np.zeros((im0.shape[0], im0.shape[1]))
-            p1[p1.shape[0]//2-im1.shape[0]//2:p1.shape[0]//2-im1.shape[0]//2 + im1.shape[0],
-               p1.shape[1]//2-im1.shape[1]//2:p1.shape[1]//2-im1.shape[1]//2 + im1.shape[1]] = im1
-            f0 = np.fft.fft2(im0)
-            f1 = np.fft.fft2(p1)
-            f0 *= np.conj(f1)
-            c = np.fft.ifft2(f0)
-            return np.fft.fftshift(c.real)[c.shape[0]//2-(im0.shape[0]-im1.shape[1])//2:c.shape[0]//2-(im0.shape[0]-im1.shape[0])//2+im0.shape[0]-im1.shape[0],
-                                           c.shape[1]//2-(im0.shape[1]-im1.shape[1])//2:c.shape[1]//2-(im0.shape[1]-im1.shape[1])//2+im0.shape[1]-im1.shape[1]]
+
+        p0 = np.zeros((im0.shape[0], im0.shape[1]))
+        p1 = np.zeros((im0.shape[0], im0.shape[1]))
+        p1[p1.shape[0]//2-im1.shape[0]//2:p1.shape[0]//2-im1.shape[0]//2 + im1.shape[0],
+           p1.shape[1]//2-im1.shape[1]//2:p1.shape[1]//2-im1.shape[1]//2 + im1.shape[1]] = im1
+        f0 = np.fft.fft2(im0)
+        f1 = np.fft.fft2(p1)
+        f0 *= np.conj(f1)
+        c = np.fft.ifft2(f0)
+        return np.fft.fftshift(c.real)
 
     def corr_cutout(self, cur_image, ref_image=None, brm=1):
         '''
@@ -517,11 +616,9 @@ class BEACON_Server():
         refIm = self.block_reduce_mean(ref_image, (brm,brm))
         curIm = self.block_reduce_mean(cur_image, (brm,brm))
         
-        corr = self.correlate_func(curIm-curIm.mean(), refIm-refIm.mean(), mode='same')
+        corr = self.correlate_func(curIm-curIm.mean(), refIm-refIm.mean())
         corr_arg = np.array(np.unravel_index(np.argmax(corr), corr.shape))
         offset = (corr_arg-np.array(refIm.shape)/2)
-        
-        #print(offset)
         
         x_start = int(np.array(refIm.shape[0])/4+offset[0])*brm
         x_end = int(3*np.array(refIm.shape[0])/4+offset[0])*brm
@@ -535,6 +632,7 @@ class BEACON_Server():
     def metric_func(self, image_data, metric):
         '''
         Calculate quality metric. Current options are:
+            Defocus Slice (df_slice) (for 1D defocus slices)
             Standard Deviation (std)
             Variance (var)
             Normalised Variance (normvar)
@@ -545,7 +643,7 @@ class BEACON_Server():
         image_data : array
             Image
         metric : str
-            Quality metric ('std', 'var', 'normvar', 'roughness')
+            Quality metric ('df_slice' (for defocus), 'std', 'var', 'normvar', 'roughness')
             
         Returns
         -------
@@ -554,11 +652,8 @@ class BEACON_Server():
         '''
         if not type(metric) is str:
             raise TypeError('Metric is not a string')
-        if metric == 'slice':
-            slice_width = 5
-            imsize = len(image_data)
-            dfslice = image_data[int(imsize/2-slice_width):int(imsize/2+slice_width)]
-            y = np.sum(dfslice, axis=0)
+        if metric == 'df_slice':
+            y = np.sum(image_data, axis=np.argmin(image_data.shape))
             fft_im = np.fft.fft(y)
             fft_abs = np.abs(fft_im)
             qval = np.sum(fft_abs[1:len(y)])/fft_abs[0]
@@ -592,43 +687,7 @@ class BEACON_Server():
         else:
             qval = None
         return qval
-    
-    def acquire_image(self, dwell_time, size):
-        '''
-        Acquire an image from the microscope
-        
-        Parameters
-        ----------
-        dwell_time : float
-            Dwell time (in seconds).
-        size : int
-            Image size.
-
-        Returns
-        -------
-        image_data : array
-            Image.
-        unitName : str
-            Units of the calibration (e.g. nm, um)
-        calX : float
-            x-calibration (nm per pixel)
-        calY : float
-            y-calibration (nm per pixel)
-        '''
-        
-        if size < 512:
-            binning = 8
-            imsize = int(np.log2(512)-np.log2(size))
-        else:
-            binning = int(4096/size)
-            imsize = 0
-        
-        self.microscope.set_acquisition_parameters(binning, imsize, dwell_time)
-        unitName, calX, calY = self.microscope.get_image_parameters()
-        image_data = self.microscope.microscope_acquire_image()
-        
-        return image_data, unitName, calX, calY
-            
+              
     def acquire_image_with_aberrations(self):
         '''
         Takes image with a given aberration (information contained in self.d dictionary) and returns the image
@@ -638,14 +697,15 @@ class BEACON_Server():
         qval : float
             Quality metric.
         im_dict : dict
-            Dictionary containing the image, unit name, calX and calY.
+            Dictionary containing the image, calX and calY, unit name.
         '''
         
         if self.d is None:
             ab_values = {'C1': 0.0}
             ab_select = {'C1': None}
             dwell_time = 1e-7
-            size = 512
+            shape = (512, 512)
+            offset = (0,0)
             metric = 'var'
             C1_defocus_flag = False
             return_images = False
@@ -655,7 +715,8 @@ class BEACON_Server():
             ab_values = self.d['ab_values']
             ab_select = self.d['ab_select']
             dwell_time = self.d['dwell']
-            size = self.d['size']
+            shape = self.d['shape']
+            offset = self.d['offset']
             metric = self.d['metric']
             C1_defocus_flag = self.d['C1_defocus_flag']
             return_images = self.d['return_images']
@@ -663,11 +724,14 @@ class BEACON_Server():
             ccorr = self.d['ccorr']
         
         self.abChange(ab_values, ab_select, C1_defocus_flag, bscomp=bscomp)
-        image_data, unitName, calX, calY = self.acquire_image(dwell_time, size)
+        image_data, calX, calY, unitName = self.microscope.microscope_acquire_image(dwell_time, shape, offset)
         self.abChange(ab_values, ab_select, C1_defocus_flag, undo=True, bscomp=bscomp)
             
-        if ccorr:
+        if ccorr and shape[0]==shape[1]: # NEED TO CONSIDER HOW TO MAKE THIS WORK FOR NON-SQUARE IMAGE
             image = self.corr_cutout(image_data)
+        elif ccorr and shape[0]!=shape[1]:
+            image = image_data
+            print('Cross-correlation not yet implemented for non-square images')
         else:
             image = image_data
         
@@ -681,6 +745,36 @@ class BEACON_Server():
             return qval, im_dict
         else:
             return qval
+    
+    def tableau_measurement(self):
+        '''
+        Takes C1A1 measurement at a given beam tilt (information contained in self.d dictionary) and returns the C1A1
+        
+        Returns
+        -------
+        c1a1 : float
+            C1/A1 measurements.
+        '''
+        
+        if self.d is None:
+            ab_values = {'WD_x': 0e-3,
+                         'WD_y': 0e-3}
+        else:
+            ab_values = self.d['ab_values']
+        
+        print(ab_values)
+        
+        self.corrector.change_aberration(name='WD', value=[ab_values['WD_x'], ab_values['WD_y']], select=None)
+        self.microscope.unblank()
+        c1a1 = self.corrector.ceos_corrector.measureC1A1()
+        self.microscope.blank()
+        self.corrector.change_aberration(name='WD', value=[-ab_values['WD_x'], -ab_values['WD_y']], select=None)
+        
+        c1a1_dict = json.loads(c1a1[0].decode('utf-8'))['result']['aberrations']
+        
+        print(c1a1_dict)
+        
+        return c1a1_dict
     
 if __name__ == '__main__':
     

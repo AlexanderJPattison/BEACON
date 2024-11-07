@@ -8,10 +8,19 @@ import pickle
 import time
 import numpy as np
 import matplotlib.pyplot as plt
+import argparse
 from GUI_Client import BEACON_Client
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--serverhost', action='store', type=str, default='localhost', help='server host')
+parser.add_argument('--serverport', action='store', type=int, default=7001, help='server port')
 
-ac_ae = BEACON_Client()
+args = parser.parse_args()
+
+host = args.serverhost
+port = args.serverport
+
+ac_ae = BEACON_Client(host, port)
 
 range_dict = {#'C1': [-100,100],
               'A1_x': [-100,100],

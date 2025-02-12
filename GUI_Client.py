@@ -49,7 +49,7 @@ class Worker(QRunnable):
 
 
 class BEACON_Client():
-    def __init__(self, host, port, SIM=False, SOCKET_TEST=False, stop=False):
+    def __init__(self, host, port, SIM=False, SOCKET_TEST=True, stop=False):
         
         self.stop = stop
         self.SIM = SIM
@@ -80,18 +80,7 @@ class BEACON_Client():
             exit()
         
         if SOCKET_TEST:
-            d = {'type': 'ac',
-                 'ab_values': {'C1': 0},
-                 'ab_select': {'C1': None},
-                 'dwell': 1e-6,
-                 'shape': (256, 256),
-                 'offset': (0, 0),
-                 'metric': 'var',
-                 'C1_defocus_flag': True,
-                 'return_images': False,
-                 'bscomp': False,
-                 'ccorr': False,
-                 }
+            d = {'type': 'ping'}
             Response = self.send_traffic(d)
             qval = Response['reply_data']
             print(qval)
@@ -102,6 +91,8 @@ class BEACON_Client():
         self.stopped_callback = None
         
         self.noise_value = None
+        
+        self.init_points = None
     
     def send_traffic(self, message):
         '''
@@ -209,7 +200,6 @@ class BEACON_Client():
         '''
         Acquire images for normalization calculations
         '''
-        #ab_keys = list(ranges.keys())
         self.norm_points = [{},{},{}]
         
         for i in range(len(self.ab_keys)):
@@ -217,14 +207,38 @@ class BEACON_Client():
             self.norm_points[1][f'{self.ab_keys[i]}'] = 0*1e-9
             self.norm_points[2][f'{self.ab_keys[i]}'] = self.ranges[f'{self.ab_keys[i]}'][1]*1e-9
         
-        self.norm_values = np.zeros(3)
-        self.norm_image_dict = [None]*3
+        self.norm_values = []
+        self.norm_image_dict = []
         
         for i in range(3):
             ab_values = self.norm_points[i]
             Response = self.get_image(ab_values)
-            self.norm_values[i], self.norm_image_dict[i] = Response['reply_data']
+            n_values, nim_dict = Response['reply_data']
+            self.norm_values.append(n_values)
+            self.norm_image_dict.append(nim_dict)
 
+    def initial_points(self, n):
+        '''
+        Acquire initial images
+        '''
+        self.init_points = []
+        
+        for i in range(n):
+            init_point_dict = {}
+            for j in range(len(self.ab_keys)):
+                init_point_dict[f'{self.ab_keys[j]}'] = np.random.uniform(self.ranges[f'{self.ab_keys[j]}'][0]*1e-9, self.ranges[f'{self.ab_keys[j]}'][1]*1e-9)
+            self.init_points.append(init_point_dict)
+        
+        self.init_values = []
+        self.init_image_dict = []
+        
+        for i in range(n):
+            ab_values = self.init_points[i]
+            Response = self.get_image(ab_values)
+            i_values, iim_dict = Response['reply_data']
+            self.init_values.append(i_values)
+            self.init_image_dict.append(iim_dict)
+            
     def custom_ucb_func(self, x, obj):
         '''
         Custom acquisition function.
@@ -320,7 +334,7 @@ class BEACON_Client():
 
         # Update GUI status bar
         if self.status_callback is not None:
-            status_reply = pickle.dumps(f'{len(obj.x_data)}, {np.array2string(x_data, precision=2, floatmode="fixed")}, {"{:.2f}".format(y_data)}')
+            status_reply = pickle.dumps(f'{len(obj.x_data)}, {np.array2string(x_data_interp, precision=2, floatmode="fixed")}, {"{:.2f}".format(y_data)}')
             self.status_callback.emit(status_reply)
         
         # Append this iteration's hyperparameters to the list
@@ -478,6 +492,8 @@ class BEACON_Client():
         C1_defocus_flag : bool
             True: Use microscope defocus to correct C1.
             False: Use aberration corrector to correct C1.
+        include_norm_runs : bool
+            Flag to include normalization runs in initial dataset
         ab_select : dict
             Dictionary of aberration names and whether to use coarse or fine correction.
         return_dict : bool
@@ -540,7 +556,7 @@ class BEACON_Client():
         self.metric = metric
         self.bscomp = bscomp
         self.ccorr = ccorr
-                
+        
         self.return_images = return_images
         if self.return_images:
             if self.ccorr:
@@ -564,8 +580,6 @@ class BEACON_Client():
             self.init_hps = init_hps
             
         if hp_bounds is None:
-            #hp_bounds_0 = np.array([[1e-1,1e2]])
-            #hp_bounds_1 = np.repeat(np.array([[1e0,1e3]]), ndims, axis=0)
             hp_bounds_0 = np.array([[1e-2,2e0]])
             hp_bounds_1 = np.repeat(np.array([[1e-2,1e0]]), ndims, axis=0)
             self.hp_bounds = np.vstack((hp_bounds_0, hp_bounds_1))
@@ -588,30 +602,48 @@ class BEACON_Client():
         #self.norm_min = 0 # FOR TESTING ONLY
         #self.norm_range = 1 # FOR TESTING ONLY
         
-        '''
-        # Todo: FINISH THIS. NEEDS TO TAKE X AND Y INDEPENDENTLY AND FEED THEM INTO self.ae
         if include_norm_runs:
-            n = self.init_size-3
+            n = np.max((0, self.init_size-3))
+            self.initial_points(n)
             
+            self.norm_values_scaled = list((self.norm_values-self.norm_min)/self.norm_range)
+            
+            self.init_points = self.init_points + self.norm_points
+            self.init_values = self.init_values + self.norm_values_scaled
+            
+        else:
+            self.initial_points(self.init_size)
+            
+        self.init_ab_values = np.zeros((self.init_size, ndims))
+        self.init_ab_values_scaled = np.zeros((self.init_size, ndims))
         
-        '''
+        for i in range(self.init_size):
+            self.init_ab_values[i] = list(self.init_points[i].values())
+            for j in range(ndims):
+                self.init_ab_values_scaled[i][j] = np.interp(self.init_ab_values[i][j]*1e9, (self.range_values[j][0], self.range_values[j][1]), (-1,1))
+                
         self.ae = AutonomousExperimenterGP(self.parameters,
                                            self.init_hps,
                                            self.hp_bounds,
                                            instrument_function=self.instrument,
-                                           init_dataset_size=self.init_size,
+                                           x_data=self.init_ab_values_scaled,
+                                           y_data=self.init_values,
                                            acquisition_function=self.acq_func,
                                            noise_function=self.custom_noise,
                                            run_every_iteration=self.run_in_every_iter,
                                            compute_device='cpu',
                                            )
         
-        for j in range(self.init_size):
+        for i in range(self.init_size):
             x_data_interp = np.zeros(ndims)
-            for i in range(ndims):
-                x_data_interp[i] = np.interp(self.ae.x_data[j][i], (-1, 1), (self.range_values[i][0], self.range_values[i][1]))
-            print(j+1, np.array2string(x_data_interp, precision=2, floatmode='fixed'), '{:.2f}'.format(self.ae.y_data[j]))
-            
+            for j in range(ndims):
+                x_data_interp[j] = np.interp(self.ae.x_data[i][j], (-1, 1), (self.range_values[j][0], self.range_values[j][1]))
+            print(i+1, np.array2string(x_data_interp, precision=2, floatmode='fixed'), '{:.2f}'.format(self.ae.y_data[i]))
+            # Update GUI status bar
+            if self.status_callback is not None:
+                status_reply = pickle.dumps(f'{i+1}, {np.array2string(x_data_interp, precision=2, floatmode="fixed")}, {"{:.2f}".format(self.ae.y_data[i])}')
+                self.status_callback.emit(status_reply)
+        
         self.ae_run(iterations)
         
     def ae_run(self, iterations, retraining_list=None):
@@ -653,6 +685,7 @@ class BEACON_Client():
         mmstr = np.array2string(self.model_max, precision=2, floatmode='fixed')
         print("model max =", mmstr, self.model_max_val)
         
+        #print(self.ae.x_data, self.ae.y_data)
         #print(mm_ab_values)
                
         self.ccorr = False
@@ -793,7 +826,7 @@ class Widget(QWidget):
         
         self.ab_list = ['C1','A1_x','A1_y','B2_x','B2_y','A2_x','A2_y']
         self.ab_display_list = ['C1','A1 (x)','A1 (y)','B2 (x)','B2 (y)','A2 (x)','A2 (y)']
-        self.ab_default_ranges = ['1','10','10','300','300','300','300']
+        self.ab_default_ranges = ['600','10','10','300','300','300','300']
         
         self.check_boxes = []
         self.lower_bounds = []
@@ -818,9 +851,9 @@ class Widget(QWidget):
             self.fine_coarse.append(fc_toggle)
             abOptionsLayout.addWidget(self.fine_coarse[i],i+1,3)
         
-        #self.check_boxes[0].setChecked(True)
-        self.check_boxes[1].setChecked(True)
-        self.check_boxes[2].setChecked(True)
+        self.check_boxes[0].setChecked(True)
+        #self.check_boxes[1].setChecked(True)
+        #self.check_boxes[2].setChecked(True)
         
         self.dwell_input = QLineEdit('2')
         self.metric_input = QComboBox()
@@ -833,7 +866,7 @@ class Widget(QWidget):
         self.acq_func_input.addItems(['Upper Confidence Bound'])
         self.acq_func_input_names = ['ucb']
         self.ucb_coefficient_input = QLineEdit('2.0')
-        self.noise_level_input = QLineEdit('0.1')
+        self.noise_level_input = QLineEdit('0.01')
         self.return_images_input = QCheckBox()
         self.return_images_input.setChecked(True)
         self.ccorr_input = QCheckBox()
@@ -841,8 +874,8 @@ class Widget(QWidget):
         self.bscomp_input = QCheckBox()
         
         shapeLayout = QGridLayout()
-        self.x_size_input = QLineEdit('512')
-        self.y_size_input = QLineEdit('512')
+        self.x_size_input = QLineEdit('256')
+        self.y_size_input = QLineEdit('256')
         self.x_offset_input = QLineEdit('0')
         self.y_offset_input = QLineEdit('0')
         shapeLayout.addWidget(QLabel('Image Shape (x, y)'),0,0)
@@ -893,15 +926,12 @@ class Widget(QWidget):
         self.blank_surrogate = np.zeros((100,100))
         
         statusPanelLayout.addWidget(QLabel('Surrogate Model'))
-        self.fig_surrogate, self.ax_surrogate = plt.subplots(1,1)
-        self.ax_surrogate.set_axis_off()
-        self.ax_surrogate.axis('equal')
-        self.imax_surrogate = self.ax_surrogate.matshow(self.blank_surrogate)
-        self.imax_surrogate_points = self.ax_surrogate.scatter([],[], s=200, cmap='magma')
-        
+        self.fig_surrogate, self.ax_surrogate = plt.subplots(1,1)      
         self.fig_surrogate.set_tight_layout(True)
         self.canvas_surrogate = FigureCanvas(self.fig_surrogate)
         statusPanelLayout.addWidget(self.canvas_surrogate)
+        
+        self.set_surrogate2D()
         
         x_toggle = QComboBox()
         x_toggle.addItems(['coarse', 'fine'])
@@ -919,8 +949,8 @@ class Widget(QWidget):
         
         imagePanelLayout = QVBoxLayout()
         
-        shape = (int(self.x_size_input.text()), int(self.y_size_input.text())) # NEEDS CHANGING
-        self.blank_image = np.zeros((shape[1],shape[0]))
+        shape = (int(self.y_size_input.text()), int(self.x_size_input.text()))
+        self.blank_image = np.zeros(shape)
         
         self.fig_before, self.ax_before = plt.subplots(1,1)
         self.ax_before.set_axis_off()
@@ -976,6 +1006,8 @@ class Widget(QWidget):
         Function triggered by "start" button. Begins BEACON run with parameters in the GUI
         '''
         
+        self.reset(buttons_reset=False)
+        
         self.ac_ae.stop = False
         
         self.start_button.setEnabled(False)
@@ -1002,7 +1034,7 @@ class Widget(QWidget):
             
             self.blank_image = np.zeros(shape_value)
             self.imax_before.set_data(self.blank_image)
-            self.imax_after.set_data(self.blank_image)        
+            self.imax_after.set_data(self.blank_image)
             
             init_size_value = int(self.init_size_input.text())
             iterations_value = int(self.iterations_input.text())
@@ -1078,26 +1110,37 @@ class Widget(QWidget):
         self.ac_ae.undo_last()
         self.undo_button.setEnabled(False)
         
-    def reset(self):
+    def reset(self, buttons_reset=True):
         '''
         Resets GUI buttons after an aberration has been accepted or rejected
         '''
-        self.accept_button.setEnabled(False)
-        self.reject_button.setEnabled(False)
-        self.continue_button.setEnabled(False)
-        self.start_button.setEnabled(True)
+        if buttons_reset:
+            self.accept_button.setEnabled(False)
+            self.reject_button.setEnabled(False)
+            self.continue_button.setEnabled(False)
+            self.start_button.setEnabled(True)
         
-        shape = (int(self.x_size_input.text()), int(self.y_size_input.text()))
+        shape_before = self.imax_before.get_array().shape
+        shape = (int(self.y_size_input.text()), int(self.x_size_input.text()))
         self.blank_image = np.zeros(shape)
         
-        self.imax_before.set_data(self.blank_image)
+        if shape!=shape_before:
+            self.ax_before.clear()
+            self.ax_before.set_axis_off()
+            self.ax_before.axis('equal') 
+            
+            self.ax_after.clear()
+            self.ax_after.set_axis_off()
+            self.ax_after.axis('equal')
+        
+        self.imax_before = self.ax_before.matshow(self.blank_image)
         self.canvas_before.draw()
         
-        self.imax_after.set_data(self.blank_image)
+        self.imax_after = self.ax_after.matshow(self.blank_image)
         self.canvas_after.draw()
         
-        self.imax_surrogate.set_data(self.blank_surrogate)
-        self.imax_surrogate_points.set_offsets(np.empty((1,2)))
+        self.ax_surrogate.clear()
+        self.set_surrogate2D()
         self.canvas_surrogate.draw()
         #if not self.ac_ae.SIM: self.ac_ae.ClientSocket.close() # Close once everything's done
     
@@ -1136,14 +1179,14 @@ class Widget(QWidget):
         Updates figure panel.
         '''
         f_re, x_data, y_data = pickle.loads(reply)
-        if len(f_re.shape)==2:
-            self.imax_surrogate.set_data(f_re)
-            self.imax_surrogate.set_clim(f_re.min(), f_re.max())
-            x_data2 = np.interp(x_data, (-1,1), (0, 100))
-            self.imax_surrogate_points.set_offsets(x_data2)
-            self.imax_surrogate_points.set_array(y_data)
-            self.imax_surrogate_points.set_cmap('magma')
-            self.canvas_surrogate.draw()
+        if len(f_re.shape)==1:
+            if not self.PLOT_IS_1D:
+                self.set_surrogate1D()
+            self.update_surrogate1D(f_re, x_data, y_data)
+        elif len(f_re.shape)==2:
+            if self.PLOT_IS_1D:
+                self.set_surrogate2D()
+            self.update_surrogate2D(f_re, x_data, y_data)
         
     @pyqtSlot(bytes) # connects to pyqtSignal object in receiver
     def on_images_data_changed(self, reply):
@@ -1174,6 +1217,47 @@ class Widget(QWidget):
             self.accept_button.setEnabled(True)
             self.reject_button.setEnabled(True)
             self.continue_button.setEnabled(True)
+    
+    def set_surrogate2D(self):
+        #print('Setting 2D')
+        self.ax_surrogate.set_axis_off()
+        self.imax_surrogate = self.ax_surrogate.matshow(self.blank_surrogate)
+        self.imax_surrogate_points = self.ax_surrogate.scatter([],[], s=200)
+        self.canvas_surrogate.draw()
+        self.PLOT_IS_1D = False
+    
+    def set_surrogate1D(self):
+        #print('Setting 1D')     
+        f_re = np.zeros(100)
+        x = np.linspace(self.ac_ae.range_values[0][0], self.ac_ae.range_values[0][1], len(f_re))
+        self.ax_surrogate.clear()
+        self.ax_surrogate.set_xlim(self.ac_ae.range_values[0][0], self.ac_ae.range_values[0][1])
+        self.ax_surrogate.set_ylim(np.min(f_re)-0.1, np.max(f_re)+0.1)
+        self.ax_surrogate.axis('auto')
+        self.imax_surrogate, = self.ax_surrogate.plot(x, f_re)
+        self.imax_surrogate_points = self.ax_surrogate.scatter([],[], s=200)
+        self.canvas_surrogate.draw()
+        self.PLOT_IS_1D = True
+    
+    def update_surrogate2D(self, f_re, x_data, y_data):
+        #print('Updating 2D')
+        self.imax_surrogate.set_data(f_re)
+        self.imax_surrogate.set_clim(f_re.min(), f_re.max())
+        x_data2 = np.interp(x_data, (-1,1), (0, 100))
+        self.imax_surrogate_points.set_offsets(x_data2)
+        self.imax_surrogate_points.set_array(y_data)
+        self.imax_surrogate_points.set_cmap('magma')
+        self.canvas_surrogate.draw()
+    
+    def update_surrogate1D(self, f_re, x_data, y_data):
+        #print('Updating 1D')
+        x = np.linspace(self.ac_ae.range_values[0][0], self.ac_ae.range_values[0][1], len(f_re))
+        self.imax_surrogate.set_data(x, f_re)
+        self.ax_surrogate.set_xlim(self.ac_ae.range_values[0][0], self.ac_ae.range_values[0][1])
+        self.ax_surrogate.set_ylim(np.min((np.min(f_re), np.min(y_data)))-0.1, np.max((np.max(f_re), np.max(y_data)))+0.1)
+        x_data2 = np.interp(x_data, (-1,1), (self.ac_ae.range_values[0][0], self.ac_ae.range_values[0][1]))
+        self.imax_surrogate_points.set_offsets(np.hstack((x_data2, np.reshape(y_data, (len(y_data),1)))))
+        self.canvas_surrogate.draw()
     
 if __name__ == "__main__":
     

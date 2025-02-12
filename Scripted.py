@@ -51,40 +51,42 @@ ab_select = {'C1': None,
              }
 
 init_size_value = 5
-runs_value = 40
+runs_value = 10
 func_value = 'ucb'
 
 dwell_value = 3e-6
-size_value = 512
+shape_value = (256,256)
+offset_value = (0,0)
 metric_value = 'normvar'
 
 return_images = True
 bscomp = False
 ccorr = True
+        
+ac_ae.ae_main(range_dict,
+              init_size_value, 
+              runs_value,
+              func_value,
+              dwell_value,
+              shape_value,
+              offset_value,
+              metric_value,
+              return_images,
+              bscomp,
+              ccorr,
+              C1_defocus_flag=True,
+              include_norm_runs=True,
+              ab_select=ab_select,
+              return_dict=True,
+              return_all_f_re=True,
+              return_final_f_re=True,
+              return_model_max_list=True,
+              custom_early_stop_flag=False,
+              ucb_coefficient=2,
+              noise_level=0.1,
+              init_hps=None,
+              hp_bounds=None)
 
-for n in range(1):
-    print(n)
-    ac_ae.ae_main(range_dict,
-                  init_size_value, 
-                  runs_value,
-                  func_value,
-                  dwell_value, 
-                  size_value, 
-                  metric_value,
-                  return_images,
-                  bscomp,
-                  ccorr,
-                  C1_defocus_flag=True,
-                  return_dict=True,
-                  return_all_f_re=True,
-                  return_final_f_re=True,
-                  return_model_max_list=True,
-                  ab_select=None,
-                  custom_early_stop_flag=False,
-                  custom_ucb_factor=3,
-                  noise_level=1e-4,
-                  init_hps=None,
-                  hp_bounds=None)
 
 fig, ax = plt.subplots(1,2)
 ax[0].imshow(ac_ae.BEACON_dict['initial_image']['image'])

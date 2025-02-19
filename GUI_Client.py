@@ -49,7 +49,7 @@ class Worker(QRunnable):
 
 
 class BEACON_Client():
-    def __init__(self, host, port, SIM=False, SOCKET_TEST=True, stop=False):
+    def __init__(self, host, port, SIM=False, SOCKET_TEST=False, stop=False):
         
         self.stop = stop
         self.SIM = SIM
@@ -820,8 +820,8 @@ class Widget(QWidget):
         
         abOptionsLayout = QGridLayout()
         abOptionsLayout.addWidget(QLabel('Aberrations'),0,0)
-        abOptionsLayout.addWidget(QLabel('Lower Bound'),0,1)
-        abOptionsLayout.addWidget(QLabel('Upper Bound'),0,2)
+        abOptionsLayout.addWidget(QLabel('Lower Bound (nm)'),0,1)
+        abOptionsLayout.addWidget(QLabel('Upper Bound (nm)'),0,2)
         abOptionsLayout.addWidget(QLabel('Select'),0,3)
         
         self.ab_list = ['C1','A1_x','A1_y','B2_x','B2_y','A2_x','A2_y']
@@ -1014,18 +1014,26 @@ class Widget(QWidget):
         self.stop_button.setEnabled(True)
         
         ONE_BOX_CHECKED_FLAG = False # Check that at least one aberration was selected
+        LOWER_LESS_THAN_UPPER_FLAG = True
         
         range_dict = {}
         
         for i in range(0,len(self.ab_list)):
             if self.check_boxes[i].isChecked():
                 ONE_BOX_CHECKED_FLAG = True
-                range_dict[self.ab_list[i]] = [int(self.lower_bounds[i].text()), 
-                                               int(self.upper_bounds[i].text())]
+                ab = self.ab_list[i]
+                lower_bound = int(self.lower_bounds[i].text())
+                upper_bound = int(self.upper_bounds[i].text())
+                if lower_bound >= upper_bound:
+                    LOWER_LESS_THAN_UPPER_FLAG = False
+                range_dict[ab] = [lower_bound, upper_bound]
                 self.ac_ae.ab_select[self.ab_list[i]] = f'{self.fine_coarse[i].currentText()}'
                 
         if not ONE_BOX_CHECKED_FLAG:
             self.msgPanel.append('Select at least one aberration')
+            self.start_button.setEnabled(True)
+        elif LOWER_LESS_THAN_UPPER_FLAG:
+            self.msgPanel.append('Lower bounds must be less than upper bounds')
             self.start_button.setEnabled(True)
         else:
             dwell_value = float(self.dwell_input.text())*1e-6

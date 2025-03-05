@@ -151,6 +151,10 @@ class TIA_control():
         self.TIA.ScanningServer().AcquireMode = 1 #0=continuous, 1=single
         self.TIA.ScanningServer().ScanMode = 2 #0=spot, 1=line, 2=frame
 
+    def open_column_valve(self):
+        self._microscope.Vacuum.ColumnValvesOpen = True
+        print('Column valves open')
+
     def close_column_valve(self):
         self._microscope.Vacuum.ColumnValvesOpen = False
         print('Column valves closed')
@@ -176,6 +180,9 @@ class TIA_control():
             self.w2D.name = self.window_name
             self.d1 = self.w2D.addDisplay('Image 1 Display', 0,0,3,1)
             self.disp = self.d1.AddImage('Image 1', sizeX, sizeY, self.TIA.Calibration2D(0,0,1,1,0,0))
+
+    def get_mag(self):
+        return self.Ill.StemMagnification
 
     def set_mag(self, mag):
         self.Ill.StemMagnification = mag
@@ -316,7 +323,7 @@ class TIA_control():
         
         myStemSearchParams = self.Acq.Detectors.AcqParams
         myStemSearchParams.Binning = binning
-        myStemSearchParams.ImageSize = 1 # Size of image (0 = full size, 1 = half size, 2 = quarter size)
+        myStemSearchParams.ImageSize = 0 # Size of image (0 = full size, 1 = half size, 2 = quarter size)
         myStemSearchParams.DwellTime = dwell
         self.Acq.Detectors.AcqParams = myStemSearchParams
         
@@ -427,9 +434,22 @@ class BEACON_Server():
                 self.microscope.move_stage_delta(self.d['dX'], self.d['dY'], self.d['dZ'], self.d['dA'], self.d['dB'])
                 reply_message = 'stage moved'
                 reply_data = None
+            elif instruction == 'get_mag':
+                reply_message = 'mag obtained'
+                reply_data = self.microscope.get_mag()
+            elif instruction == 'get_stage_pos':
+                reply_message = 'pos obtained'
+                reply_data = self.microscope.get_stage_pos()
             elif instruction == 'set_mag':
                 self.microscope.set_mag(self.d['mag'])
                 reply_message = 'mag changed'
+                reply_data = None
+            elif instruction == 'open_column_valve':
+                self.microscope.open_column_valve()
+                if self.microscope._microscope.Vacuum.ColumnValvesOpen:
+                    reply_message = 'column valve open'
+                else:
+                    reply_message = 'column valve NOT open'
                 reply_data = None
             elif instruction == 'close_column_valve':
                 self.microscope.close_column_valve()

@@ -22,9 +22,16 @@ class CorrectorCommands():
     Adapted from CorrectorServer.py provided by CEOS, GmbH.
     '''
     def __init__(self, host='localhost', port=7072, verbose=False):
+        print('Attempting to connecting to CEOS RPC gateway at '+str(rpchost)+':'+str(rpcport))
         self.host = host
         self.port = port
         self.v = verbose
+        try:
+            self.getInfo()
+            print('Connected')
+        except ConnectionRefusedError:
+            print('Could not connect to RPC gateway')
+            exit()
         
     def communicate(self, name, parameter=None):
         '''
@@ -132,6 +139,15 @@ class CorrectorCommands():
         :returns: a Deferred containing the aberrations as dict
         """
         return self.communicate('measureC1A1')
+    
+    def acquireTableau(self, angle, tabType='fast', maxFit='B2'):
+        """
+        Acquire a tableau
+        """
+        params = {'tabType': tabType,
+                  'angle': angle}
+        d = self.communicate('acquireTableau', params)
+        return d
     
 class TIA_control():
     def __init__(self):
@@ -345,38 +361,12 @@ class TIA_control():
 
         return image_data, calX, calY, unitName
 
-class CEOS_RPC_control():
-    def __init__(self, rpchost, rpcport):
-        print('Attempting to connecting to CEOS RPC gateway at '+str(rpchost)+':'+str(rpcport))
-        try:
-            self.ceos_corrector = CorrectorCommands(rpchost, rpcport)
-            self.ceos_corrector.getInfo()
-            print('Connected')
-        except ConnectionRefusedError:
-            print('Could not connect to RPC gateway')
-            exit()
-    
-    def change_aberration(self, name, value, select):
-        '''
-        Change aberrations
-        
-        Parameters
-        ----------
-        name : str
-            Name of aberration to be changed ('C1', 'A1', 'B2', 'A2', 'C3', 'A3', 'S3', 'We' (beam shift))
-        value : 2-element list or array
-            Amount to change the aberration by (in metres)
-        select : str
-            Use 'coarse' or 'fine' correction ('None' for C1 and C3)
-        '''
-        self.ceos_corrector.correctAberration(name=name, value=value, select=select)
-
 class BEACON_Server():
     def __init__(self, port, rpchost, rpcport, SIM=False, TEST=False):
         
         self.SIM = SIM
         if not self.SIM:
-            self.corrector = CEOS_RPC_control(rpchost, rpcport) 
+            self.corrector = CorrectorCommands(host=rpchost, port=rpcport) 
             self.microscope = TIA_control()
         
         context = zmq.Context()
@@ -499,17 +489,17 @@ class BEACON_Server():
                     if C1_defocus_flag:
                         self.microscope.change_defocus(ab_vals[i])
                     else:
-                        self.corrector.change_aberration(name=ab_keys[i], value=[ab_vals[i],0], select=ab_select[ab_keys[i]])
+                        self.corrector.correctAberration(name=ab_keys[i], value=[ab_vals[i],0], select=ab_select[ab_keys[i]])
                 else:
-                    self.corrector.change_aberration(name=ab_keys[i], value=[ab_vals[i],0], select=ab_select[ab_keys[i]])
+                    self.corrector.correctAberration(name=ab_keys[i], value=[ab_vals[i],0], select=ab_select[ab_keys[i]])
             elif ab_keys[i].endswith('_x'):
-                self.corrector.change_aberration(name=ab_keys[i][:2], value=[ab_vals[i],0], select=ab_select[ab_keys[i]])
+                self.corrector.correctAberration(name=ab_keys[i][:2], value=[ab_vals[i],0], select=ab_select[ab_keys[i]])
             elif ab_keys[i].endswith('_y'): # UGLY!!!!
-                self.corrector.change_aberration(name=ab_keys[i][:2], value=[0,ab_vals[i]], select=ab_select[ab_keys[i]])
+                self.corrector.correctAberration(name=ab_keys[i][:2], value=[0,ab_vals[i]], select=ab_select[ab_keys[i]])
         
         if bscomp:
             comp_x, comp_y = self.comp_shift_calc(ab_values)
-            self.corrector.change_aberration(name='We', value=[comp_x, comp_y], select=None)
+            self.corrector.correctAberration(name='We', value=[comp_x, comp_y], select=None)
     
     def comp_shift_calc(self, ab_values):
         '''
@@ -784,11 +774,11 @@ class BEACON_Server():
         
         print(ab_values)
         
-        self.corrector.change_aberration(name='WD', value=[ab_values['WD_x'], ab_values['WD_y']], select=None)
+        self.corrector.correctAberration(name='WD', value=[ab_values['WD_x'], ab_values['WD_y']], select=None)
         self.microscope.unblank()
         c1a1 = self.corrector.ceos_corrector.measureC1A1()
         self.microscope.blank()
-        self.corrector.change_aberration(name='WD', value=[-ab_values['WD_x'], -ab_values['WD_y']], select=None)
+        self.corrector.correctAberration(name='WD', value=[-ab_values['WD_x'], -ab_values['WD_y']], select=None)
         
         c1a1_dict = json.loads(c1a1[0].decode('utf-8'))['result']['aberrations']
         

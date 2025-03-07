@@ -49,7 +49,7 @@ class Worker(QRunnable):
 
 
 class BEACON_Client():
-    def __init__(self, host, port, SIM=False, SOCKET_TEST=False, stop=False):
+    def __init__(self, host, port, SIM=False, SOCKET_TEST=True, stop=False):
         
         self.stop = stop
         self.SIM = SIM
@@ -154,7 +154,7 @@ class BEACON_Client():
         for k, v in ab_values.items():
             if v > 1e-4:
                 print(f'{k} ab_value is > 1e-4')
-                
+        
         d = {'type': 'ac',
              'ab_values': ab_values,
              'ab_select': self.ab_select,
@@ -343,11 +343,17 @@ class BEACON_Client():
         
         # Return the shape of the surrogate model
         if self.return_all_f_re:
-            if ndims<3:
+            if ndims==2 or ndims==3:
                 f_re = self.get_f_re(obj)
                 self.f_re_list.append(f_re)
                 if self.figure_callback is not None:
-                    figure_reply = pickle.dumps((f_re, obj.x_data, obj.y_data))
+                    figure_reply = pickle.dumps((f_re, obj.x_data, obj.y_data, None))
+                    self.figure_callback.emit(figure_reply)
+            elif ndims==1:
+                f_re, v_re = self.get_f_re(obj, get_v_re=True)
+                self.f_re_list.append(f_re)
+                if self.figure_callback is not None:
+                    figure_reply = pickle.dumps((f_re, obj.x_data, obj.y_data, v_re*self.ucb_coefficient))
                     self.figure_callback.emit(figure_reply)
             '''
             elif ndims==3 or ndims==4:
@@ -364,7 +370,7 @@ class BEACON_Client():
                     model_max[i] = np.interp(model_max[i], (-1, 1), (self.range_values[i][0], self.range_values[i][1]))
                 self.model_max_list.append(model_max)
     
-    def get_f_re(self, obj, points=50):
+    def get_f_re(self, obj, points=50, get_v_re=False):
         '''
         Get shape of the surrogate model
         
@@ -390,11 +396,16 @@ class BEACON_Client():
             mdims_flat[i] = mdims[i].ravel()
         x_pred = np.stack(mdims_flat).T
         
-        f = obj.gp_optimizer.posterior_mean(x_pred)["f(x)"]
         shape = tuple([points]*ndims)
+        f = obj.gp_optimizer.posterior_mean(x_pred)["f(x)"]
         f_re = np.reshape(f,shape)
         
-        return f_re
+        if get_v_re:
+            v = obj.gp_optimizer.posterior_covariance(x_pred)["v(x)"]
+            v_re = np.reshape(v,shape)
+            return f_re, v_re
+        else:
+            return f_re
     
     def create_dict(self):
         '''
@@ -447,7 +458,7 @@ class BEACON_Client():
                 bscomp,
                 ccorr,
                 C1_defocus_flag=True,
-                include_norm_runs=True,
+                include_norm_runs=False,
                 ab_select=None,
                 return_dict=False,
                 return_all_f_re=False,
@@ -605,14 +616,12 @@ class BEACON_Client():
         if include_norm_runs:
             n = np.max((0, self.init_size-3))
             self.initial_points(n)
-            
-            self.norm_values_scaled = list((self.norm_values-self.norm_min)/self.norm_range)
-            
             self.init_points = self.init_points + self.norm_points
-            self.init_values = self.init_values + self.norm_values_scaled
-            
+            self.init_values = self.init_values + self.norm_values
         else:
             self.initial_points(self.init_size)
+            
+        self.init_values = list((self.init_values-self.norm_min)/self.norm_range)
             
         self.init_ab_values = np.zeros((self.init_size, ndims))
         self.init_ab_values_scaled = np.zeros((self.init_size, ndims))
@@ -621,7 +630,7 @@ class BEACON_Client():
             self.init_ab_values[i] = list(self.init_points[i].values())
             for j in range(ndims):
                 self.init_ab_values_scaled[i][j] = np.interp(self.init_ab_values[i][j]*1e9, (self.range_values[j][0], self.range_values[j][1]), (-1,1))
-                
+        
         self.ae = AutonomousExperimenterGP(self.parameters,
                                            self.init_hps,
                                            self.hp_bounds,
@@ -770,7 +779,8 @@ class BEACON_Client():
                      undo=True, bscomp=self.bscomp)
         
         self.last_saved_correction = {}
-    
+    """
+    # UNUSED
     def rebuild(self, hps=None, x_data=None, y_data=None):
         
         '''
@@ -802,9 +812,10 @@ class BEACON_Client():
         
         #self.ae_2.train()
         
-        self.final_f_re_2, self.final_v_re_2 = self.get_f_re(self.ae_2)
+        self.final_f_re_2 = self.get_f_re(self.ae_2)
         self.model_max_2 = self.ae_2.gp_optimizer.ask(bounds=self.parameters, acquisition_function='maximum')['x'][0]
-
+    """
+    
 class Widget(QWidget):
     def __init__(self, host, port, parent=None):
         '''
@@ -820,8 +831,8 @@ class Widget(QWidget):
         
         abOptionsLayout = QGridLayout()
         abOptionsLayout.addWidget(QLabel('Aberrations'),0,0)
-        abOptionsLayout.addWidget(QLabel('Lower Bound (nm)'),0,1)
-        abOptionsLayout.addWidget(QLabel('Upper Bound (nm)'),0,2)
+        abOptionsLayout.addWidget(QLabel('Lower Bound'),0,1)
+        abOptionsLayout.addWidget(QLabel('Upper Bound'),0,2)
         abOptionsLayout.addWidget(QLabel('Select'),0,3)
         
         self.ab_list = ['C1','A1_x','A1_y','B2_x','B2_y','A2_x','A2_y']
@@ -875,7 +886,7 @@ class Widget(QWidget):
         
         shapeLayout = QGridLayout()
         self.x_size_input = QLineEdit('256')
-        self.y_size_input = QLineEdit('256')
+        self.y_size_input = QLineEdit('10')
         self.x_offset_input = QLineEdit('0')
         self.y_offset_input = QLineEdit('0')
         shapeLayout.addWidget(QLabel('Image Shape (x, y)'),0,0)
@@ -1014,26 +1025,18 @@ class Widget(QWidget):
         self.stop_button.setEnabled(True)
         
         ONE_BOX_CHECKED_FLAG = False # Check that at least one aberration was selected
-        LOWER_LESS_THAN_UPPER_FLAG = True
         
         range_dict = {}
         
         for i in range(0,len(self.ab_list)):
             if self.check_boxes[i].isChecked():
                 ONE_BOX_CHECKED_FLAG = True
-                ab = self.ab_list[i]
-                lower_bound = int(self.lower_bounds[i].text())
-                upper_bound = int(self.upper_bounds[i].text())
-                if lower_bound >= upper_bound:
-                    LOWER_LESS_THAN_UPPER_FLAG = False
-                range_dict[ab] = [lower_bound, upper_bound]
+                range_dict[self.ab_list[i]] = [int(self.lower_bounds[i].text()), 
+                                               int(self.upper_bounds[i].text())]
                 self.ac_ae.ab_select[self.ab_list[i]] = f'{self.fine_coarse[i].currentText()}'
                 
         if not ONE_BOX_CHECKED_FLAG:
             self.msgPanel.append('Select at least one aberration')
-            self.start_button.setEnabled(True)
-        elif LOWER_LESS_THAN_UPPER_FLAG:
-            self.msgPanel.append('Lower bounds must be less than upper bounds')
             self.start_button.setEnabled(True)
         else:
             dwell_value = float(self.dwell_input.text())*1e-6
@@ -1186,11 +1189,11 @@ class Widget(QWidget):
         '''
         Updates figure panel.
         '''
-        f_re, x_data, y_data = pickle.loads(reply)
+        f_re, x_data, y_data, error = pickle.loads(reply)
         if len(f_re.shape)==1:
             if not self.PLOT_IS_1D:
                 self.set_surrogate1D()
-            self.update_surrogate1D(f_re, x_data, y_data)
+            self.update_surrogate1D(f_re, x_data, y_data, error)
         elif len(f_re.shape)==2:
             if self.PLOT_IS_1D:
                 self.set_surrogate2D()
@@ -1242,8 +1245,15 @@ class Widget(QWidget):
         self.ax_surrogate.set_xlim(self.ac_ae.range_values[0][0], self.ac_ae.range_values[0][1])
         self.ax_surrogate.set_ylim(np.min(f_re)-0.1, np.max(f_re)+0.1)
         self.ax_surrogate.axis('auto')
-        self.imax_surrogate, = self.ax_surrogate.plot(x, f_re)
-        self.imax_surrogate_points = self.ax_surrogate.scatter([],[], s=200)
+        self.imax_surrogate, = self.ax_surrogate.plot(x, f_re, lw=4, label=u'Prediction')
+        self.imax_surrogate_points = self.ax_surrogate.scatter([],[], s=200, c='r', label=u'Observations')
+        
+        '''
+        self.imax_surrogate_fill = self.ax_surrogate.fill(np.concatenate([x, x[::-1]]),
+                                                          np.concatenate([x, x[::-1]]),
+                                                          alpha=.5, fc='b', ec='None', label=u'Confidence Bound')
+        '''
+        
         self.canvas_surrogate.draw()
         self.PLOT_IS_1D = True
     
@@ -1257,9 +1267,17 @@ class Widget(QWidget):
         self.imax_surrogate_points.set_cmap('magma')
         self.canvas_surrogate.draw()
     
-    def update_surrogate1D(self, f_re, x_data, y_data):
+    def update_surrogate1D(self, f_re, x_data, y_data, error):
         #print('Updating 1D')
         x = np.linspace(self.ac_ae.range_values[0][0], self.ac_ae.range_values[0][1], len(f_re))
+        '''
+        path = self.imax_surrogate_fill[0].get_paths()[0]
+        path.vertices = np.column_stack([np.concatenate([x, x[::-1]]),
+                                         np.concatenate([f_re-error,
+                                                        (f_re+error)[::-1]])
+                                         ])
+        '''
+        
         self.imax_surrogate.set_data(x, f_re)
         self.ax_surrogate.set_xlim(self.ac_ae.range_values[0][0], self.ac_ae.range_values[0][1])
         self.ax_surrogate.set_ylim(np.min((np.min(f_re), np.min(y_data)))-0.1, np.max((np.max(f_re), np.max(y_data)))+0.1)

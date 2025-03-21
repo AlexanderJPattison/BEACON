@@ -216,11 +216,11 @@ class TIA_control():
         n = 15
         print('Moving by {}, {}, {}, {}, {}'.format(dX, dY, dZ, dA, dB))
         stageObj = self.Stage.Position
-        stageObj.X += dX
-        stageObj.Y += dY
-        stageObj.Z += dZ
-        stageObj.A += dA
-        stageObj.B += dB
+        stageObj.X += float(dX)
+        stageObj.Y += float(dY)
+        stageObj.Z += float(dZ)
+        stageObj.A += float(dA)
+        stageObj.B += float(dB)
         self.Stage.GoTo(stageObj, n)
         #print('Stage moved to = {}'.format(self.Stage.Position()))
 
@@ -332,14 +332,17 @@ class TIA_control():
         image_data : array
             Acquired image
         '''
-        if shape[0] > 512:
-            binning = 4
-        else:
+
+        if shape[0] < 512:
             binning = 8
+            imsize = int(np.log2(512)-np.log2(shape[0]))
+        else:
+            binning = int(4096/shape[0])
+            imsize = 0
         
         myStemSearchParams = self.Acq.Detectors.AcqParams
         myStemSearchParams.Binning = binning
-        myStemSearchParams.ImageSize = 0 # Size of image (0 = full size, 1 = half size, 2 = quarter size)
+        myStemSearchParams.ImageSize = imsize # Size of image (0 = full size, 1 = half size, 2 = quarter size)
         myStemSearchParams.DwellTime = dwell
         self.Acq.Detectors.AcqParams = myStemSearchParams
         
@@ -362,12 +365,14 @@ class TIA_control():
         return image_data, calX, calY, unitName
 
 class BEACON_Server():
-    def __init__(self, port, rpchost, rpcport, SIM=False, TEST=False):
+    def __init__(self, port, rpchost, rpcport, SIM=False, TEST=False, TIA=True, CEOS=True):
         
         self.SIM = SIM
         if not self.SIM:
-            self.corrector = CorrectorCommands(host=rpchost, port=rpcport) 
-            self.microscope = TIA_control()
+            if CEOS:
+                self.corrector = CorrectorCommands(host=rpchost, port=rpcport) 
+            if TIA:
+                self.microscope = TIA_control()
         
         context = zmq.Context()
         serverSocket = context.socket(zmq.REP)
@@ -401,24 +406,24 @@ class BEACON_Server():
             if instruction == 'ping':
                 reply_message = 'pinged'
                 reply_data = None
+            elif instruction == 'tableau':
+                reply_message = 'tableau measured'
+                reply_data = self.tableau_measurement()
             elif instruction == 'ac':
                 reply_message = 'ac'
                 reply_data = self.acquire_image_with_aberrations()
-            elif instruction == 'ref':
-                self.refImage, _, _, _ = self.microscope.microscope_acquire_image(self.d['dwell'], self.d['shape'])
-                reply_message = 'reference image set'
-                reply_data = self.refImage
             elif instruction == 'ab_only':
                 self.abChange(self.d['ab_values'], self.d['ab_select'], self.d['C1_defocus_flag'],
                               undo=False, bscomp=self.d['bscomp'])
                 reply_message = 'aberrations changed'
                 reply_data = None
-            elif instruction == 'tableau':
-                reply_message = 'tableau measured'
-                reply_data = self.tableau_measurement()
+            elif instruction == 'ref':
+                self.refImage, _, _, _ = self.microscope.microscope_acquire_image(self.d['dwell'], self.d['shape'])
+                reply_message = 'reference image set'
+                reply_data = self.refImage
             elif instruction == 'image':
                 reply_message = 'image acquired'
-                reply_data = self.microscope.microscope_acquire_image_old(self.d['dwell'], self.d['shape'], self.d['offset'])
+                reply_data = self.microscope.microscope_acquire_image(self.d['dwell'], self.d['shape'], self.d['offset'])
             elif instruction == 'move_stage':
                 print(self.d)
                 self.microscope.move_stage_delta(self.d['dX'], self.d['dY'], self.d['dZ'], self.d['dA'], self.d['dB'])
@@ -792,11 +797,15 @@ if __name__ == '__main__':
     parser.add_argument('--serverport', action='store', type=int, default=7001, help='server port')
     parser.add_argument('--rpchost', action='store', type=str, default='localhost', help='rpc host')
     parser.add_argument('--rpcport', action='store', type=int, default=7072, help='rpc port')
+    parser.add_argument('--tia', action='store', type=bool, default=True, help='set TIA control')
+    parser.add_argument('--ceos', action='store', type=bool, default=True, help='set CEOS control')
     
     args = parser.parse_args()
     
     serverport = args.serverport
     rpchost = args.rpchost
     rpcport = args.rpcport
+    tia = args.tia
+    ceos = args.ceos
     
-    server = BEACON_Server(serverport, rpchost, rpcport)
+    server = BEACON_Server(serverport, rpchost, rpcport, TIA=tia, CEOS=ceos)

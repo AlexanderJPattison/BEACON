@@ -34,7 +34,7 @@ BEACON uses a client-server model that allows the Bayesian optimization to be ha
 
 3) On your BEACON computer, run `python Scripted.py --serverhost <IP host address of server> --serverport <IP port address of server>`.
 Note: Default IP addresses are: `--serverhost 'localhost', --serverport 7001, --rpchost 'localhost', --rpcport 7072`
-Note: The `Connected to 'host' at 'port'' message on the client is meaningless. The way to determine if it has truly connected is to look at the server output and see `ping' after you have opened the client. I will fix this in a future update.
+Note: The `Connected to 'host' at 'port'` message on the client is meaningless. The way to determine if it has truly connected is to look at the server output and see `ping` after you have opened the client. I will fix this in a future update.
 
 # Setting up BEACON
 Click the checkboxes next to aberrations you want to correct and select the upper and lower search bounds for the optimization. These bounds are relative to the current state (i.e. 0 is the current value).

@@ -12,7 +12,8 @@ Microscope computer
 
 BEACON computer
 - Python 3.9 or greater
-- Python modules: gpcam 4.0.0, numpy, sys, pickle, pyzmq, matplotlib, pyqt
+- Python modules: gpcam v8.0.4, numpy, sys, pickle, pyzmq, matplotlib, pyqt
+- Module installation instructions: pip install gpcam==8.0.4 pyzmq
 
 # Installation
 BEACON uses a client-server model that allows the Bayesian optimization to be handled by a different computer to the one controlling the microscope (they can also be run on the same computer).

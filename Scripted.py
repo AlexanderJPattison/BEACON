@@ -105,7 +105,7 @@ for ii in range(len(mm_array)):
     
     mm_array[ii] = mm
 
-'''
+
 x = input('Correct? 0/1')
 if x == '1':
     print('Correcting')
@@ -116,99 +116,10 @@ end = time.time()
 time_taken = end-start
 
 print(time_taken)
-'''
+
 
 mm_mag = np.linalg.norm(mm_array, axis=1)
 mm_mag_mean = np.mean(mm_mag)
 mm_mag_std = np.std(mm_mag)
 
 print(f'{mm_mag_mean}, {mm_mag_std}')
-
-#A1: 1.63011585, 1.74120843
-#%%
-'''
-A1_mm_mag = np.linalg.norm(A1_mm_array, axis=1)
-A1_mm_mag_mean = np.mean(A1_mm_mag)
-A1_mm_mag_std = np.std(A1_mm_mag)
-
-print(f'{A1_mm_mag_mean}, {A1_mm_mag_std}')
-
-B2_mm_mag = np.linalg.norm(B2_mm_array, axis=1)
-B2_mm_mag_mean = np.mean(B2_mm_mag)
-B2_mm_mag_std = np.std(B2_mm_mag)
-
-print(f'{B2_mm_mag_mean}, {B2_mm_mag_std}')
-
-A2_mm_mag = np.linalg.norm(A2_mm_array, axis=1)
-A2_mm_mag_mean = np.mean(A2_mm_mag)
-A2_mm_mag_std = np.std(A2_mm_mag)
-
-print(f'{A2_mm_mag_mean}, {A2_mm_mag_std}')
-
-B2_A2_mm_array_B2 = mm_array[:,:2]
-B2_A2_mm_array_A2 = mm_array[:,2:]
-
-B2_A2_mm_mag_B2 = np.linalg.norm(B2_A2_mm_array_B2, axis=1)
-B2_A2_mm_mag_mean_B2 = np.mean(B2_A2_mm_mag_B2)
-B2_A2_mm_mag_std_B2 = np.std(B2_A2_mm_mag_B2)
-
-B2_A2_mm_mag_A2 = np.linalg.norm(B2_A2_mm_array_A2, axis=1)
-B2_A2_mm_mag_mean_A2 = np.mean(B2_A2_mm_mag_A2)
-B2_A2_mm_mag_std_A2 = np.std(B2_A2_mm_mag_A2)
-
-print(f'{B2_A2_mm_mag_mean_B2}, {B2_A2_mm_mag_std_B2}')
-print(f'{B2_A2_mm_mag_mean_A2}, {B2_A2_mm_mag_std_A2}')
-
-36.60387882485541, 27.948055272744707
-6.6148280935806785, 4.251670697242646
-
-C1: 1.8992839577349403, 0.01207764180947354 # 1.9 MAY BE OPTIMAL
-
-mm_array = mm_array[mm_array[:,0]>-5]
-
-C1_A1_mm_array_C1 = mm_array[:,:2]
-C1_A1_mm_array_A1 = mm_array[:,2:]
-
-C1_A1_mm_mag_C1 = np.linalg.norm(C1_A1_mm_array_C1, axis=1)
-C1_A1_mm_mag_mean_C1 = np.mean(C1_A1_mm_mag_C1)
-C1_A1_mm_mag_std_C1 = np.std(C1_A1_mm_mag_C1)
-
-C1_A1_mm_mag_A1 = np.linalg.norm(C1_A1_mm_array_A1, axis=1)
-C1_A1_mm_mag_mean_A1 = np.mean(C1_A1_mm_mag_A1)
-C1_A1_mm_mag_std_A1 = np.std(C1_A1_mm_mag_A1)
-
-print(f'{C1_A1_mm_mag_mean_C1}, {C1_A1_mm_mag_std_C1}')
-print(f'{C1_A1_mm_mag_mean_A1}, {C1_A1_mm_mag_std_A1}')
-
-1.933628589019686, 0.48999832631535195
-0.5448859702837017, 0.7268362908407474
-
-
-SevenD_mm_array_C1 = mm_array[:,:2]
-SevenD_mm_array_A1 = mm_array[:,2:4]
-SevenD_mm_array_B2 = mm_array[:,4:6]
-SevenD_mm_array_A2 = mm_array[:,6:]
-
-SevenD_mm_mag_C1 = np.linalg.norm(SevenD_mm_array_C1, axis=1)
-SevenD_mm_mag_mean_C1 = np.mean(SevenD_mm_mag_C1)
-SevenD_mm_mag_std_C1 = np.std(SevenD_mm_mag_C1)
-
-SevenD_mm_mag_A1 = np.linalg.norm(SevenD_mm_array_A1, axis=1)
-SevenD_mm_mag_mean_A1 = np.mean(SevenD_mm_mag_A1)
-SevenD_mm_mag_std_A1 = np.std(SevenD_mm_mag_A1)
-
-SevenD_mm_mag_B2 = np.linalg.norm(SevenD_mm_array_B2, axis=1)
-SevenD_mm_mag_mean_B2 = np.mean(SevenD_mm_mag_B2)
-SevenD_mm_mag_std_B2 = np.std(SevenD_mm_mag_B2)
-
-SevenD_mm_mag_A2 = np.linalg.norm(SevenD_mm_array_A2, axis=1)
-SevenD_mm_mag_mean_A2 = np.mean(SevenD_mm_mag_A2)
-SevenD_mm_mag_std_A2 = np.std(SevenD_mm_mag_A2)
-
-print(f'{SevenD_mm_mag_mean_C1}, {SevenD_mm_mag_std_C1}')
-print(f'{SevenD_mm_mag_mean_A1}, {SevenD_mm_mag_std_A1}')
-print(f'{SevenD_mm_mag_mean_B2}, {SevenD_mm_mag_std_B2}')
-print(f'{SevenD_mm_mag_mean_A2}, {SevenD_mm_mag_std_A2}')
-
-
-'''

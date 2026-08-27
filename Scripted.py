@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed Nov 15 10:35:09 2023
-
-@author: advanced_user
+Automated Bayesian optimization experiment using BEACON algorithm to find optimal 
+instrument parameters. Runs multiple optimization cycles, visualizes results, and 
+computes statistics on parameter optimization magnitudes.
 """
-import pickle
 import time
 import numpy as np
 import matplotlib.pyplot as plt
@@ -104,22 +103,17 @@ for ii in range(len(mm_array)):
         ab_values[ab_keys[i]] = mm[i]*1e-9
     
     mm_array[ii] = mm
+end = time.time()
+time_taken = end-start
+print(time_taken)
 
-
-x = input('Correct? 0/1')
+x = input('Apply correction? 0/1')
 if x == '1':
     print('Correcting')
     ac_ae.ab_only(ab_values)
-'''
-'''
-end = time.time()
-time_taken = end-start
-
-print(time_taken)
-
 
 mm_mag = np.linalg.norm(mm_array, axis=1)
 mm_mag_mean = np.mean(mm_mag)
 mm_mag_std = np.std(mm_mag)
 
-print(f'{mm_mag_mean}, {mm_mag_std}')
+print(f'Mean: {mm_mag_mean}, STD: {mm_mag_std}')

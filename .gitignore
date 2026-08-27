@@ -1,0 +1,44 @@
+# Byte-compiled / optimized Python files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Packaging and distribution
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+
+# Test and coverage output
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Type checkers and linters
+.mypy_cache/
+.pyre/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE and local settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local environment files
+.env
+.env.*
+!.env.example

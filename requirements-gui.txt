@@ -1,0 +1,3 @@
+-r requirements-core.txt
+PyQt5
+matplotlib

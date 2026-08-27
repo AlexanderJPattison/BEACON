@@ -9,7 +9,7 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
-from GUI_Client import BEACON_Client
+from beacon_client import BEACON_Client
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--serverhost', action='store', type=str, default='localhost', help='server host')

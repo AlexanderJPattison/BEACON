@@ -12,15 +12,17 @@ Microscope computer
 
 BEACON computer
 - Python 3.9 or greater
-- Python modules: gpcam v8.0.4, numpy, sys, pickle, pyzmq, matplotlib, pyqt
-- Module installation instructions: pip install gpcam==8.0.4 pyzmq
+- Core Python modules: gpcam v8.0.4, numpy, pyzmq
+- GUI Python modules: PyQt5, matplotlib
+- Core installation: `pip install -r requirements-core.txt`
+- GUI installation: `pip install -r requirements-gui.txt`
 
 # Installation
 BEACON uses a client-server model that allows the Bayesian optimization to be handled by a different computer to the one controlling the microscope (they can also be run on the same computer).
 
 1) Clone or download this repository.
 2) Move Server.py to the computer controlling the microscope and the CEOS corrector (Microscope computer).
-3) Move GUI_Client.py to the computer that you wish to run the Bayesian optimization on (BEACON computer).
+3) Move `beacon_client.py` and either `GUI_Client.py` or your own client program to the computer that you wish to run the Bayesian optimization on (BEACON computer).
 
 # Opening BEACON
 1) Open the CEOS RPC Gateway on your microscope computer.

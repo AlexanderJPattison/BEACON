@@ -1,0 +1,3 @@
+gpcam==8.0.4
+numpy
+pyzmq

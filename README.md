@@ -26,20 +26,16 @@ BEACON uses a client-server model that allows the Bayesian optimization to be ha
 
 # Opening BEACON
 1) Open the CEOS RPC Gateway on your microscope computer.
-2) On your microscope computer, run `BEACON_Server.bat' (Start menu on NCEM computers)
-
---OR--
-
 2) On your microscope computer, run `python Server.py --serverport <IP port address for server> --rpchost <IP host address of CEOS RPC gateway> --rpcport <IP port address of CEOS RPC gateway>`.
 3) On your BEACON computer, run `python GUI_Client.py --serverhost <IP host address of server> --serverport <IP port address of server>`.
 
 --OR--
 
-3) On your BEACON computer, run `python Scripted.py --serverhost <IP host address of server> --serverport <IP port address of server>`.
+3) On your BEACON computer, run `python beacon_parameter_optimizer.py --serverhost <IP host address of server> --serverport <IP port address of server>`.
 Note: Default IP addresses are: `--serverhost 'localhost', --serverport 7001, --rpchost 'localhost', --rpcport 7072`
 Note: The `Connected to 'host' at 'port'` message on the client is meaningless. The way to determine if it has truly connected is to look at the server output and see `ping` after you have opened the client. I will fix this in a future update.
 
-# Setting up BEACON
+# Setting up BEACON GUI
 Click the checkboxes next to aberrations you want to correct and select the upper and lower search bounds for the optimization. These bounds are relative to the current state (i.e. 0 is the current value).
 
 `Image Shape (x,y)`: shape of the images used in the optimization.
@@ -68,7 +64,7 @@ Click the checkboxes next to aberrations you want to correct and select the uppe
 
 `Compensate with Beam Shift`: NOT RECOMMENDED. This was an alternative to cross-correlation for maintaining the field of view, which was required to test third-order aberrations. However, this appears to introduce extra aberrations that make this method worthless. Only use for testing.
 
-# Running BEACON
+# Running BEACON optimization
 Once all parameters have been set, click `Start` to begin.
 
 `Stop` stops the optimization run mid-run. Suggested corrections can be accepted or rejected at this stage.

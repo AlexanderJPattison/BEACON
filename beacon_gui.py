@@ -550,8 +550,3 @@ if __name__ == "__main__":
     w = Widget(host, port)
     w.show()
     sys.exit(app.exec_())
-
-'''
-To-do
-Plot points on scatter - Unimportant
-'''

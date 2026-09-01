@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Sep 15 10:14:26 2023
-
-@author: alexa
-"""
-
 import zmq
 import numpy as np
 import pickle

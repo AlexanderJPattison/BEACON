@@ -1,15 +1,8 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Sep 15 10:14:54 2023
-
-@author: alexa
-"""
-
 from gpcam.autonomous_experimenter import AutonomousExperimenterGP
 import numpy as np
-import sys
 import pickle
 import time
+
 class BEACON_Client():
     def __init__(self, host, port, SIM=False, SOCKET_TEST=True, stop=False):
         

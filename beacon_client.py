@@ -2,6 +2,7 @@ from gpcam.autonomous_experimenter import AutonomousExperimenterGP
 import numpy as np
 import pickle
 import time
+import zmq
 
 class BEACON_Client():
     def __init__(self, host, port, SIM=False, SOCKET_TEST=True, stop=False):
